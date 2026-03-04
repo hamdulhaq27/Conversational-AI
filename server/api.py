@@ -22,7 +22,7 @@ app = FastAPI(title="Restaurant Reservation Conversational AI")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://conversational-ai-gules.vercel.app/"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
