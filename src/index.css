@@ -1,0 +1,128 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Restaurant & Fast Food Design System — Warm, Inviting, Light */
+
+@layer base {
+  :root {
+    --font-heading: 'Outfit', sans-serif;
+    --font-body: 'Inter', sans-serif;
+
+    /* Light, clean background */
+    --background: 40 33% 98%; 
+    --foreground: 20 14% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 20 14% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 20 14% 15%;
+
+    /* Warm Orange/Red Button Primary */
+    --primary: 15 85% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Soft grey/orange for secondary elements */
+    --secondary: 30 20% 94%;
+    --secondary-foreground: 20 14% 15%;
+
+    --muted: 30 10% 94%;
+    --muted-foreground: 25 10% 45%;
+
+    --accent: 35 90% 55%; /* Warm Yellow/Orange Accent */
+    --accent-foreground: 20 14% 15%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 30 15% 90%;
+    --input: 30 15% 90%;
+    --ring: 15 85% 55%;
+
+    --radius: 1rem;
+
+    /* Text hierarchy */
+    --text-primary: 20 14% 15%;
+    --text-secondary: 25 10% 40%;
+  }
+
+  /* Optional Dark Mode if needed, though light is preferred for this aesthetic */
+  .dark {
+    --background: 20 14% 10%;
+    --foreground: 40 33% 98%;
+    --card: 20 14% 12%;
+    --card-foreground: 40 33% 98%;
+    --popover: 20 14% 12%;
+    --popover-foreground: 40 33% 98%;
+    --primary: 15 85% 55%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 20 10% 18%;
+    --secondary-foreground: 40 33% 98%;
+    --muted: 20 10% 18%;
+    --muted-foreground: 25 10% 70%;
+    --border: 20 10% 20%;
+    --input: 20 10% 20%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+
+  /* Typography scale */
+  h1 {
+    font-size: clamp(2.5rem, 5vw, 4rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-size: clamp(1.8rem, 3.5vw, 2.5rem);
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+  }
+
+  p {
+    font-size: 1rem;
+    line-height: 1.6;
+    color: hsl(var(--text-secondary));
+  }
+}
+
+@layer components {
+  /* Soft, elevated shadows appropriate for modern light UI */
+  .glass-header {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  }
+  
+  .dark .glass-header {
+    background: rgba(25, 20, 20, 0.85);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .shadow-soft {
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 0 3px rgba(0,0,0,0.02);
+  }
+}

@@ -1,0 +1,91 @@
+{
+  "info": {
+    "name": "Restaurant Reservation Conversational AI",
+    "_postman_id": "00000000-0000-0000-0000-000000000001",
+    "description": "Postman collection for Phase IV FastAPI + WebSocket backend.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/health",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Create Session",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "http://localhost:8000/session",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["session"]
+        }
+      }
+    },
+    {
+      "name": "Get Session Info",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/session/{{session_id}}",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["session", "{{session_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Reset Session",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "http://localhost:8000/session/{{session_id}}/reset",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8000",
+          "path": ["session", "{{session_id}}", "reset"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "session_id",
+      "value": ""
+    }
+  ]
+}
+
