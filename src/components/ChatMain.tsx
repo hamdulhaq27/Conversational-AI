@@ -20,7 +20,8 @@ const ChatMain = () => {
     let reconnectTimer: NodeJS.Timeout;
 
     const connectWebSocket = () => {
-      const socket = new WebSocket("ws://localhost:8000/ws/chat");
+      const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws/chat";
+      const socket = new WebSocket(wsUrl);
       ws.current = socket;
 
       socket.onmessage = (event) => {
