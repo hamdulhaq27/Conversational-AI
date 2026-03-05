@@ -5,22 +5,25 @@ This repository contains a fully local, CPU-optimized, microservices-based conve
 ## Setup Instructions
 
 ### Prerequisites
-1. [Docker & Docker Compose](https://docs.docker.com/get-docker/) installed.
-2. [Ollama](https://ollama.com/) running locally. Wait for it to start.
-3. Pull an optimized local model through Ollama, e.g., `ollama pull phi3`.
+1. [Docker Desktop](https://docs.docker.com/get-docker/) installed and running.
+2. [Ollama](https://ollama.com/) installed and running locally.
+3. Download the specific AI model used by this project:
+   ```bash
+   ollama pull qwen:1.8b
+   ```
 
 ### Running the System
-1. Clone the GitHub repository.
-2. If your Ollama instance exposes the API differently, adjust `docker-compose.yml`. By default, the backend expects Ollama on `http://host.docker.internal:11434`.
-3. Build and spin up the backend and frontend services:
+1. Open a terminal in the project's root folder (`ember-refine`).
+2. Build and start the backend and frontend containers:
    ```bash
    docker compose up --build -d
    ```
-4. Access the ChatGPT-style Web Interface at [http://localhost:3000](http://localhost:3000).
+3. Open your browser and access the Restaurant Assistant at: **[http://localhost:3000](http://localhost:3000)**
 
-*Alternatively, to run natively:*
-- Backend: `cd server && pip install -r requirements.txt && uvicorn api:app --host 0.0.0.0 --port 8000`
-- Frontend: `npm i && npm run dev`
+*To stop the system later, run:*
+```bash
+docker compose down
+```
 
 ## Architecture Diagram
 
