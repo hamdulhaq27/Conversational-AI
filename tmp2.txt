@@ -1,0 +1,48 @@
+﻿backend-1  | INFO:     Started server process [1]
+backend-1  | INFO:     Waiting for application startup.
+backend-1  | 2026-03-08 11:51:43,483 - api - INFO - [SERVER] Startup ΓÇö triggering background model warm-up...
+backend-1  | 2026-03-08 11:51:43,483 - conversation_manager - INFO - [SERVER] Pre-warming model (loading into RAM)...
+backend-1  | 2026-03-08 11:51:43,832 - conversation_manager - INFO - [SERVER] Created persistent httpx.AsyncClient
+backend-1  | INFO:     Application startup complete.
+backend-1  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+backend-1  | INFO:     ('172.18.0.1', 42290) - "WebSocket /ws/chat" [accepted]
+backend-1  | 2026-03-08 11:51:45,096 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | INFO:     ('172.18.0.1', 42304) - "WebSocket /ws/chat" [accepted]
+backend-1  | 2026-03-08 11:51:45,773 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | INFO:     ('172.18.0.1', 42310) - "WebSocket /ws/chat" [accepted]
+backend-1  | 2026-03-08 11:51:45,806 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | 2026-03-08 11:51:50,702 - httpx - INFO - HTTP Request: POST http://host.docker.internal:11434/api/chat "HTTP/1.1 200 OK"
+backend-1  | 2026-03-08 11:51:50,709 - conversation_manager - INFO - [SERVER] Model pre-warm complete ΓÇö loaded in RAM.
+backend-1  | 2026-03-08 11:52:11,198 - api - INFO - [SERVER] Client WebSocket disconnected.
+backend-1  | INFO:     connection closed
+backend-1  | INFO:     ('172.18.0.1', 55216) - "WebSocket /ws/chat" [accepted]
+backend-1  | 2026-03-08 11:52:11,543 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | 2026-03-08 11:52:36,393 - api - INFO - [SERVER] Generated on-the-fly session: ce684aad-016b-4c9d-ad0d-c93a6ca80449
+backend-1  | 2026-03-08 11:52:36,422 - api - INFO - [SERVER] Request received at /ws/chat
+backend-1  | 2026-03-08 11:52:36,422 - api - INFO - [SERVER] User message: "i need to reserve a table for 5 people tomorrow at 8 pm"
+backend-1  | 2026-03-08 11:52:36,422 - api - INFO - [SERVER] Calling AI model...
+backend-1  | 2026-03-08 11:52:36,423 - conversation_manager - INFO - [SERVER] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] Stage: collecting | Intent: new_reservation | Memory: {'date': 'tomorrow', 'time': '8 pm', 'guests': '5', 'name': None, 'dietary_preferences': None, 'special_requests': None}
+backend-1  | 2026-03-08 11:52:36,423 - conversation_manager - INFO - [SERVER] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] Calling AI model... (8 turns)
+backend-1  | 2026-03-08 11:53:11,231 - httpx - INFO - HTTP Request: POST http://host.docker.internal:11434/api/chat "HTTP/1.1 200 OK"
+backend-1  | 2026-03-08 11:53:11,239 - conversation_manager - INFO - [SERVER] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] First token: 34.82s
+backend-1  | 2026-03-08 11:53:18,857 - conversation_manager - INFO - [SERVER] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] AI done in 42.43s
+backend-1  | 2026-03-08 11:53:18,857 - conversation_manager - INFO - [PERFORMANCE] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] 42.43s | ~42 words
+backend-1  | 2026-03-08 11:53:18,857 - api - INFO - [SERVER] AI response received in 42.43 seconds
+backend-1  | 2026-03-08 11:53:18,857 - api - INFO - [PERFORMANCE] Total response time: 42.43 seconds
+backend-1  | 2026-03-08 11:53:18,857 - api - INFO - [SERVER] Sending response to client
+backend-1  | 2026-03-08 11:55:08,568 - api - INFO - [SERVER] Request received at /ws/chat
+backend-1  | 2026-03-08 11:55:08,598 - api - INFO - [SERVER] User message: "haider abbas and for diet: im lactose intolerant so no dairy items"
+backend-1  | 2026-03-08 11:55:08,600 - api - INFO - [SERVER] Calling AI model...
+backend-1  | 2026-03-08 11:55:08,706 - conversation_manager - INFO - [SERVER] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] Stage: collecting | Intent: deny | Memory: {'date': 'tomorrow', 'time': '8 pm', 'guests': '5', 'name': None, 'dietary_preferences': None, 'special_requests': None}
+backend-1  | 2026-03-08 11:55:08,720 - conversation_manager - INFO - [SERVER] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] Calling AI model... (10 turns)
+backend-1  | 2026-03-08 11:55:46,360 - httpx - INFO - HTTP Request: POST http://host.docker.internal:11434/api/chat "HTTP/1.1 200 OK"
+backend-1  | 2026-03-08 11:55:46,461 - conversation_manager - INFO - [SERVER] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] AI done in 37.70s
+backend-1  | 2026-03-08 11:55:46,461 - conversation_manager - INFO - [PERFORMANCE] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] 37.70s | ~0 words
+backend-1  | 2026-03-08 11:55:46,518 - conversation_manager - WARNING - [WARNING] [ce684aad-016b-4c9d-ad0d-c93a6ca80449] LLM returned empty response ΓÇö using fallback
+backend-1  | 2026-03-08 11:55:46,577 - api - INFO - [SERVER] AI response received in 37.98 seconds
+backend-1  | 2026-03-08 11:55:46,583 - api - INFO - [PERFORMANCE] Total response time: 37.98 seconds
+backend-1  | 2026-03-08 11:55:46,583 - api - INFO - [SERVER] Sending response to client

@@ -1,0 +1,50 @@
+﻿backend-1  | 2026-03-08 12:03:31,466 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | INFO:     ('172.18.0.1', 34108) - "WebSocket /ws/chat" [accepted]
+backend-1  | 2026-03-08 12:03:31,540 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | INFO:     ('172.18.0.1', 34122) - "WebSocket /ws/chat" [accepted]
+backend-1  | 2026-03-08 12:03:32,660 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | 2026-03-08 12:03:41,250 - httpx - INFO - HTTP Request: POST http://host.docker.internal:11434/api/chat "HTTP/1.1 200 OK"
+backend-1  | 2026-03-08 12:03:41,281 - conversation_manager - INFO - [SERVER] Model pre-warm complete ΓÇö loaded in RAM.
+backend-1  | INFO:     ('172.18.0.1', 59206) - "WebSocket /ws/chat" [accepted]
+backend-1  | 2026-03-08 12:04:04,207 - api - INFO - [SERVER] WebSocket connection accepted.
+backend-1  | INFO:     connection open
+backend-1  | 2026-03-08 12:04:20,557 - api - INFO - [SERVER] Generated on-the-fly session: 93562533-9fbb-4fc7-b900-0c49d1c79d9e
+backend-1  | 2026-03-08 12:04:20,581 - api - INFO - [SERVER] Request received at /ws/chat
+backend-1  | 2026-03-08 12:04:20,582 - api - INFO - [SERVER] User message: "i need to reserve a table for 5 people tomorrow at 8 pm"
+backend-1  | 2026-03-08 12:04:20,582 - api - INFO - [SERVER] Calling AI model...
+backend-1  | 2026-03-08 12:04:20,611 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] Stage: collecting | Intent: new_reservation | Memory: {'date': 'tomorrow', 'time': '8 pm', 'guests': '5', 'name': None, 'dietary_preferences': None, 'special_requests': None}
+backend-1  | 2026-03-08 12:04:20,622 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] Calling AI model... (8 turns)
+backend-1  | 2026-03-08 12:04:46,648 - httpx - INFO - HTTP Request: POST http://host.docker.internal:11434/api/chat "HTTP/1.1 200 OK"
+backend-1  | 2026-03-08 12:04:46,675 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] First token: 26.05s
+backend-1  | 2026-03-08 12:04:53,025 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] AI done in 32.40s
+backend-1  | 2026-03-08 12:04:53,026 - conversation_manager - INFO - [PERFORMANCE] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] 32.40s | ~40 words
+backend-1  | 2026-03-08 12:04:53,026 - api - INFO - [SERVER] AI response received in 32.44 seconds
+backend-1  | 2026-03-08 12:04:53,026 - api - INFO - [PERFORMANCE] Total response time: 32.44 seconds
+backend-1  | 2026-03-08 12:04:53,026 - api - INFO - [SERVER] Sending response to client
+backend-1  | 2026-03-08 12:05:53,022 - api - INFO - [SERVER] Request received at /ws/chat
+backend-1  | 2026-03-08 12:05:53,022 - api - INFO - [SERVER] User message: "haider abbas and for diet: im lactose intolerant so no dairy items"
+backend-1  | 2026-03-08 12:05:53,022 - api - INFO - [SERVER] Calling AI model...
+backend-1  | 2026-03-08 12:05:53,029 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] Stage: confirming | Intent: deny | Memory: {'date': 'tomorrow', 'time': '8 pm', 'guests': '5', 'name': 'diet', 'dietary_preferences': 'lactose intolerant', 'special_requests': None}
+backend-1  | 2026-03-08 12:05:53,031 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] Calling AI model... (10 turns)
+backend-1  | 2026-03-08 12:06:15,130 - httpx - INFO - HTTP Request: POST http://host.docker.internal:11434/api/chat "HTTP/1.1 200 OK"
+backend-1  | 2026-03-08 12:06:15,153 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] First token: 22.12s
+backend-1  | 2026-03-08 12:06:17,820 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] AI done in 24.79s
+backend-1  | 2026-03-08 12:06:17,833 - conversation_manager - INFO - [PERFORMANCE] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] 24.79s | ~25 words
+backend-1  | 2026-03-08 12:06:17,834 - api - INFO - [SERVER] AI response received in 24.81 seconds
+backend-1  | 2026-03-08 12:06:17,835 - api - INFO - [PERFORMANCE] Total response time: 24.81 seconds
+backend-1  | 2026-03-08 12:06:17,835 - api - INFO - [SERVER] Sending response to client
+backend-1  | 2026-03-08 12:06:38,652 - api - INFO - [SERVER] Request received at /ws/chat
+backend-1  | 2026-03-08 12:06:38,653 - api - INFO - [SERVER] User message: "yes that is enough."
+backend-1  | 2026-03-08 12:06:38,653 - api - INFO - [SERVER] Calling AI model...
+backend-1  | 2026-03-08 12:06:38,658 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] Stage: confirmed | Intent: confirm | Memory: {'date': 'tomorrow', 'time': '8 pm', 'guests': '5', 'name': 'diet', 'dietary_preferences': 'lactose intolerant', 'special_requests': None}
+backend-1  | 2026-03-08 12:06:38,661 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] Calling AI model... (16 turns)
+backend-1  | 2026-03-08 12:07:13,460 - httpx - INFO - HTTP Request: POST http://host.docker.internal:11434/api/chat "HTTP/1.1 200 OK"
+backend-1  | 2026-03-08 12:07:13,463 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] First token: 34.80s
+backend-1  | 2026-03-08 12:07:18,035 - conversation_manager - INFO - [SERVER] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] AI done in 39.37s
+backend-1  | 2026-03-08 12:07:18,035 - conversation_manager - INFO - [PERFORMANCE] [93562533-9fbb-4fc7-b900-0c49d1c79d9e] 39.37s | ~24 words
+backend-1  | 2026-03-08 12:07:18,035 - api - INFO - [SERVER] AI response received in 39.38 seconds
+backend-1  | 2026-03-08 12:07:18,035 - api - INFO - [PERFORMANCE] Total response time: 39.38 seconds
+backend-1  | 2026-03-08 12:07:18,035 - api - INFO - [SERVER] Sending response to client

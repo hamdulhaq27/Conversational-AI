@@ -8,44 +8,85 @@ interface Message {
   content: string;
 }
 
+// ─── Hardcoded greeting (no LLM call needed) ────────────────────────────────
+const BOT_GREETING: Message = {
+  role: "assistant",
+  content:
+    "Hello! I'm the virtual assistant for La Bella Tavola 🍝.\nI can help you with reservations, opening hours, menu questions, and more.\nHow may I assist you today?",
+};
+
 const ChatMain = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([BOT_GREETING]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isReceiving, setIsReceiving] = useState(false);
+  const [waitingLong, setWaitingLong] = useState(false); // Show "Generating..." after delay
   const ws = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const requestStartRef = useRef<number>(0);
+  const longWaitTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Clear the long-wait timer helper
+  const clearLongWaitTimer = () => {
+    if (longWaitTimerRef.current) {
+      clearTimeout(longWaitTimerRef.current);
+      longWaitTimerRef.current = null;
+    }
+    setWaitingLong(false);
+  };
 
   useEffect(() => {
     let reconnectTimer: NodeJS.Timeout;
 
     const connectWebSocket = () => {
-      // Use environment variable if available, otherwise fallback to localhost for local testing
       const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws/chat";
+      console.log("[CHATBOT] Connecting to WebSocket:", wsUrl);
       const socket = new WebSocket(wsUrl);
       ws.current = socket;
 
+      socket.onopen = () => {
+        console.log("[CHATBOT] WebSocket connection opened.");
+      };
+
       socket.onmessage = (event) => {
         const data = JSON.parse(event.data);
+        console.log("[CHATBOT] WebSocket frame received:", data);
+
         if (data.type === "session") {
+          console.log("[CHATBOT] Session ID received:", data.session_id);
           setSessionId(data.session_id);
+
         } else if (data.type === "token") {
+          // First token arrived — clear the "Generating..." indicator
+          clearLongWaitTimer();
           setIsReceiving(true);
           setMessages((prev) => {
             const newMessages = [...prev];
             const lastMsg = newMessages[newMessages.length - 1];
-            if (lastMsg && lastMsg.role === "assistant") {
+            if (lastMsg && lastMsg.role === "assistant" && lastMsg !== BOT_GREETING) {
+              lastMsg.content += data.token;
+            } else if (lastMsg && lastMsg.role === "assistant" && lastMsg.content === BOT_GREETING.content) {
+              newMessages.push({ role: "assistant", content: data.token });
+            } else if (lastMsg && lastMsg.role === "assistant") {
               lastMsg.content += data.token;
             } else {
               newMessages.push({ role: "assistant", content: data.token });
             }
             return newMessages;
           });
+
         } else if (data.type === "end") {
+          clearLongWaitTimer();
+          const elapsed = ((performance.now() - requestStartRef.current) / 1000).toFixed(2);
+          console.log(`[CHATBOT] Backend response complete (${elapsed}s)`);
+          console.log(`[PERFORMANCE] Total response time: ${elapsed} seconds`);
+          console.log("[CHATBOT] Rendering bot response");
           setIsReceiving(false);
+
         } else if (data.type === "error") {
+          clearLongWaitTimer();
           setIsReceiving(false);
-          console.error("WebSocket Error:", data.error);
+          console.error("[CHATBOT] WebSocket Error:", data.error);
           setMessages((prev) => [
             ...prev,
             { role: "assistant", content: `**Error:** ${data.error}` },
@@ -54,9 +95,13 @@ const ChatMain = () => {
       };
 
       socket.onclose = () => {
-        console.log("WebSocket disconnected, reconnecting in 2 seconds...");
+        console.log("[CHATBOT] WebSocket disconnected, reconnecting in 2s...");
         clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(connectWebSocket, 2000);
+      };
+
+      socket.onerror = (err) => {
+        console.error("[CHATBOT] WebSocket error event:", err);
       };
     };
 
@@ -64,8 +109,9 @@ const ChatMain = () => {
 
     return () => {
       clearTimeout(reconnectTimer);
+      clearLongWaitTimer();
       if (ws.current) {
-        ws.current.onclose = null; // Prevent reconnect on component unmount
+        ws.current.onclose = null;
         ws.current.close();
       }
     };
@@ -73,14 +119,13 @@ const ChatMain = () => {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, waitingLong]);
 
   const handleSend = () => {
     if (!input.trim() || !ws.current) return;
 
-    // If socket died but hasn't fully reconnected yet, attempt to capture state
     if (ws.current.readyState !== WebSocket.OPEN) {
-      console.warn("WebSocket is not open, cannot send message right now.");
+      console.warn("[CHATBOT] WebSocket not open, cannot send.");
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: "**System:** Backend disconnected. Attempting to reconnect..." },
@@ -89,9 +134,21 @@ const ChatMain = () => {
     }
 
     const userMessage = input.trim();
+    console.log(`[CHATBOT] User message sent: "${userMessage}"`);
     setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
     setInput("");
     setIsReceiving(true);
+
+    // Start timer
+    requestStartRef.current = performance.now();
+    console.log("[CHATBOT] Sending request to backend...");
+
+    // Start long-wait indicator after 5 seconds
+    clearLongWaitTimer();
+    longWaitTimerRef.current = setTimeout(() => {
+      console.log("[CHATBOT] Response taking long — showing generating indicator");
+      setWaitingLong(true);
+    }, 5000);
 
     ws.current.send(
       JSON.stringify({
@@ -102,11 +159,12 @@ const ChatMain = () => {
   };
 
   const handleReset = () => {
-    // Drop the old session ID completely and clear screen.
-    // The next time we send a message, the server will issue a brand new Session ID.
+    console.log("[CHATBOT] Session reset — inserting greeting.");
+    clearLongWaitTimer();
     setSessionId(null);
-    setMessages([]);
+    setMessages([BOT_GREETING]);
     setInput("");
+    setIsReceiving(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -142,72 +200,51 @@ const ChatMain = () => {
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto px-4 pb-32 pt-8 overflow-x-hidden">
         <div className="mx-auto max-w-3xl space-y-8">
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full mt-24 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <div className="h-20 w-20 bg-orange-100 rounded-full flex items-center justify-center mb-6 shadow-inner border border-orange-200">
-                <ChefHat className="h-10 w-10 text-primary" strokeWidth={1.5} />
-              </div>
-              <h2 className="font-heading text-3xl font-bold text-foreground mb-3 text-center">
-                Benvenuto!
-              </h2>
-              <p className="text-muted-foreground text-center max-w-sm mb-8 text-lg">
-                I'm your virtual host. Would you like to check our availability or reserve a table for your group?
-              </p>
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex w-full animate-in fade-in slide-in-from-bottom-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              {msg.role === "assistant" && (
+                <div className="flex-shrink-0 h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mr-3 mt-1">
+                  <ChefHat className="h-4 w-4 text-primary" />
+                </div>
+              )}
 
-              <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-                <button onClick={() => setInput("I'd like to book a table for 2 tonight at 7 PM.")} className="px-4 py-2 bg-white border border-border shadow-sm rounded-full text-sm text-foreground hover:border-primary hover:text-primary transition-all">
-                  Book a table for 2 tonight
-                </button>
-                <button onClick={() => setInput("What are your opening hours?")} className="px-4 py-2 bg-white border border-border shadow-sm rounded-full text-sm text-foreground hover:border-primary hover:text-primary transition-all">
-                  Check opening hours
-                </button>
-                <button onClick={() => setInput("I need to change my reservation.")} className="px-4 py-2 bg-white border border-border shadow-sm rounded-full text-sm text-foreground hover:border-primary hover:text-primary transition-all">
-                  Modify reservation
-                </button>
-              </div>
-            </div>
-          ) : (
-            messages.map((msg, i) => (
               <div
-                key={i}
-                className={`flex w-full animate-in fade-in slide-in-from-bottom-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                className={`rounded-2xl px-5 py-3.5 max-w-[80%] shadow-sm overflow-hidden min-w-[3rem] ${msg.role === "user"
+                  ? "bg-primary text-primary-foreground ml-12 rounded-tr-sm"
+                  : "bg-white border border-border text-foreground mr-12 rounded-tl-sm"
+                  }`}
               >
-                {msg.role === "assistant" && (
-                  <div className="flex-shrink-0 h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mr-3 mt-1">
-                    <ChefHat className="h-4 w-4 text-primary" />
+                {msg.role === "user" ? (
+                  <div className="whitespace-pre-wrap font-medium break-words">{msg.content}</div>
+                ) : (
+                  <div className="prose prose-sm md:prose-base dark:prose-invert max-w-none text-foreground leading-relaxed break-words overflow-x-auto w-full max-w-full [&_pre]:max-w-full">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
                   </div>
                 )}
-
-                <div
-                  className={`rounded-2xl px-5 py-3.5 max-w-[80%] shadow-sm overflow-hidden min-w-[3rem] ${msg.role === "user"
-                    ? "bg-primary text-primary-foreground ml-12 rounded-tr-sm"
-                    : "bg-white border border-border text-foreground mr-12 rounded-tl-sm"
-                    }`}
-                >
-                  {msg.role === "user" ? (
-                    <div className="whitespace-pre-wrap font-medium break-words">{msg.content}</div>
-                  ) : (
-                    <div className="prose prose-sm md:prose-base dark:prose-invert max-w-none text-foreground leading-relaxed break-words overflow-x-auto w-full max-w-full [&_pre]:max-w-full">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {msg.content}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-                </div>
               </div>
-            ))
-          )}
+            </div>
+          ))}
 
-          {/* Typing indicator when waiting for first token */}
+          {/* Typing indicator — bouncing dots while waiting for first token */}
           {isReceiving && messages.length > 0 && messages[messages.length - 1].role === "user" && (
             <div className="flex w-full animate-in fade-in slide-in-from-bottom-2 justify-start">
               <div className="flex-shrink-0 h-8 w-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center mr-3 mt-1">
                 <ChefHat className="h-4 w-4 text-primary" />
               </div>
-              <div className="rounded-2xl px-5 py-4 max-w-[80%] bg-white border border-border shadow-sm flex items-center gap-1.5 h-[52px] rounded-tl-sm">
+              <div className="rounded-2xl px-5 py-4 max-w-[80%] bg-white border border-border shadow-sm flex items-center gap-2 rounded-tl-sm">
                 <span className="w-2 h-2 rounded-full bg-primary/40 animate-bounce" style={{ animationDelay: "0ms" }}></span>
                 <span className="w-2 h-2 rounded-full bg-primary/50 animate-bounce" style={{ animationDelay: "150ms" }}></span>
                 <span className="w-2 h-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                {waitingLong && (
+                  <span className="ml-2 text-xs text-muted-foreground animate-pulse">
+                    Generating response, please wait…
+                  </span>
+                )}
               </div>
             </div>
           )}
