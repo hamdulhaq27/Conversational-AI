@@ -1,4 +1,4 @@
-import { Send, RotateCcw, UtensilsCrossed, ChefHat, MessageSquare } from "lucide-react";
+import { Send, RotateCcw, UtensilsCrossed, ChefHat, MessageSquare, Mic, Square } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,6 +25,11 @@ const ChatMain = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestStartRef = useRef<number>(0);
   const longWaitTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Audio recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Clear the long-wait timer helper
   const clearLongWaitTimer = () => {
@@ -91,6 +96,22 @@ const ChatMain = () => {
             ...prev,
             { role: "assistant", content: `**Error:** ${data.error}` },
           ]);
+        } else if (data.type === "audio_response") {
+          console.log("[CHATBOT] Received audio response, playing...");
+          try {
+            const byteCharacters = atob(data.audio_base64);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: "audio/wav" });
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.play().catch(e => console.error("[CHATBOT] Audio playback failed:", e));
+          } catch (e) {
+            console.error("[CHATBOT] Failed to process audio response:", e);
+          }
         }
       };
 
@@ -165,6 +186,76 @@ const ChatMain = () => {
     setMessages([BOT_GREETING]);
     setInput("");
     setIsReceiving(false);
+    if (isRecording) {
+      handleStopRecording();
+    }
+  };
+
+  const handleStartRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = () => {
+          const base64data = reader.result as string;
+          const base64Audio = base64data.split(",")[1]; // remove the data:audio/webm;base64, prefix
+
+          if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+
+          console.log("[CHATBOT] Sending audio message...");
+          // Optimistically add an indicator to the UI
+          setMessages((prev) => [...prev, { role: "user", content: "🎙️ (Voice Message)" }]);
+          setIsReceiving(true);
+          requestStartRef.current = performance.now();
+          clearLongWaitTimer();
+          longWaitTimerRef.current = setTimeout(() => {
+            setWaitingLong(true);
+          }, 5000);
+
+          ws.current.send(
+            JSON.stringify({
+              type: "audio",
+              session_id: sessionId,
+              audio_base64: base64Audio,
+            })
+          );
+        };
+
+        // Stop all tracks to release microphone
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      console.log("[CHATBOT] Started recording audio...");
+    } catch (err) {
+      console.error("[CHATBOT] Microphone access denied or unavailable", err);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "🚨 **System Error:** Microphone access denied or unavailable. Please check your browser permissions." },
+      ]);
+      setIsRecording(false);
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      console.log("[CHATBOT] Stopped recording audio.");
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -262,15 +353,26 @@ const ChatMain = () => {
             </div>
             <input
               type="text"
-              placeholder="E.g., I want a table for 4 at 8 PM..."
+              placeholder={isRecording ? "Listening... Speak now 🎙️" : "E.g., I want a table for 4 at 8 PM..."}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={isReceiving}
+              disabled={isReceiving || isRecording}
               className="flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground/70 outline-none disabled:opacity-50 py-2"
               autoFocus
             />
             <div className="flex items-center gap-2 ml-2">
+              <button
+                onClick={isRecording ? handleStopRecording : handleStartRecording}
+                disabled={isReceiving}
+                className={`flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200 shadow-sm ${isRecording
+                  ? "bg-red-500 text-white hover:bg-red-600 animate-pulse"
+                  : "bg-secondary text-secondary-foreground hover:bg-zinc-200"
+                  } disabled:opacity-50`}
+                title={isRecording ? "Stop Recording" : "Record Voice"}
+              >
+                {isRecording ? <Square className="h-4 w-4 fill-current" /> : <Mic className="h-5 w-5" />}
+              </button>
               <button
                 onClick={handleSend}
                 disabled={!input.trim() || isReceiving}

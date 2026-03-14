@@ -11,7 +11,9 @@ Improvements applied:
 import logging
 import time
 from typing import Any, Dict
-
+import base64
+import tempfile
+import os
 import asyncio
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -26,6 +28,9 @@ from conversation_manager import (
     chat_stream,
     _warmup_model,
 )
+
+from voice.asr_service import asr_service_instance
+from voice.tts_service import tts_service_instance
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("api")
@@ -47,7 +52,12 @@ app.add_middleware(
 async def startup_warmup():
     """Pre-warm the AI model so the first real user request is fast."""
     logger.info("[SERVER] Startup — triggering background model warm-up...")
+    # Warmup LLM
     asyncio.create_task(_warmup_model())
+    
+    # Pre-load ASR and TTS models into memory using a background thread so it does not block the event loop
+    asyncio.create_task(asyncio.to_thread(asr_service_instance.load))
+    asyncio.create_task(asyncio.to_thread(tts_service_instance.load))
 
 
 @app.get("/health")
@@ -106,14 +116,58 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "error", "error": "Invalid payload"})
                 continue
 
-            message = raw.get("message")
+            msg_type = raw.get("type", "text")
             session_id = raw.get("session_id")
+            message = ""
 
-            if not message or not isinstance(message, str):
-                await websocket.send_json(
-                    {"type": "error", "error": "Field 'message' (string) is required"}
-                )
-                continue
+            if msg_type in ["audio", "audio_partial"]:
+                audio_base64 = raw.get("audio_base64")
+                if not audio_base64:
+                    await websocket.send_json({"type": "error", "error": "Missing audio_base64"})
+                    continue
+                
+                try:
+                    # decode base64
+                    audio_bytes = base64.b64decode(audio_base64)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+                        temp_audio.write(audio_bytes)
+                        temp_audio_path = temp_audio.name
+                        
+                    # run ASR service non-blocking
+                    transcription = await asyncio.to_thread(asr_service_instance.transcribe_audio, temp_audio_path)
+                    os.remove(temp_audio_path)
+                    
+                    if msg_type == "audio_partial":
+                        await websocket.send_json({"type": "transcription_partial", "text": transcription})
+                        continue
+                        
+                    message = transcription
+                    print(f"User speech detected: {message}")
+                    logger.info(f"User speech detected: {message}")
+                    
+                    # Send transcription back to client
+                    await websocket.send_json({
+                        "type": "transcription",
+                        "text": message
+                    })
+                    
+                    if not message:
+                        await websocket.send_json({"type": "error", "message": "Speech recognition failed"})
+                        continue
+                except Exception as e:
+                    logger.error(f"[ERROR] Audio processing failed: {e}")
+                    if os.path.exists(temp_audio_path):
+                        os.remove(temp_audio_path)
+                    await websocket.send_json({"type": "error", "message": "Speech recognition failed"})
+                    continue
+            else:
+                # default to text behavior
+                message = raw.get("message")
+                if not message or not isinstance(message, str):
+                    await websocket.send_json(
+                        {"type": "error", "error": "Field 'message' (string) is required"}
+                    )
+                    continue
 
             # ── Create session on-the-fly if client did not supply one ───────
             if not session_id:
@@ -137,7 +191,9 @@ async def websocket_chat(websocket: WebSocket) -> None:
             try:
                 logger.info(f"[SERVER] Calling AI model...")
 
+                full_response = ""
                 async for token in chat_stream(session_id, message):
+                    full_response += token
                     await websocket.send_json({"type": "token", "token": token})
                     await asyncio.sleep(0)  # yield control to flush frame
 
@@ -146,12 +202,34 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 logger.info(f"[PERFORMANCE] Total response time: {total_time:.2f} seconds")
                 logger.info(f"[SERVER] Sending response to client")
                 await websocket.send_json({"type": "end"})
+                
+                # TTS generation
+                if full_response.strip():
+                    try:
+                        logger.info("[TTS] Generating audio for response...")
+                        tts_start = time.time()
+                        audio_base64 = await asyncio.to_thread(tts_service_instance.generate_speech, full_response)
+                        tts_time = time.time() - tts_start
+                        logger.info(f"[PERFORMANCE] TTS generation time: {tts_time:.2f} seconds")
+                        
+                        if audio_base64:
+                            await websocket.send_json({
+                                "type": "audio_response",
+                                "audio_base64": audio_base64
+                            })
+                    except Exception as e:
+                        logger.error(f"[ERROR] TTS generation failed: {e}")
+                        if msg_type == "audio":
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "Audio generation failed"
+                            })
 
             except Exception as exc:  # noqa: BLE001
                 elapsed = time.time() - request_start
                 logger.error(f"[ERROR] AI request failed after {elapsed:.2f}s: {exc}")
                 await websocket.send_json(
-                    {"type": "error", "error": f"Internal error: {exc}"}
+                    {"type": "error", "message": f"Internal error: {exc}"}
                 )
 
     except WebSocketDisconnect:

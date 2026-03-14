@@ -1,4 +1,12 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
   backend:
     build:
       context: ./server
@@ -6,10 +14,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Assuming Ollama is running on the host machine
-      - OLLAMA_URL=http://host.docker.internal:11434/api/chat
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - OLLAMA_URL=http://ollama:11434/api/chat
+    depends_on:
+      - ollama
     restart: unless-stopped
 
   frontend:
@@ -21,3 +28,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  ollama_data:

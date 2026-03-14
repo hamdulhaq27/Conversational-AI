@@ -44,7 +44,7 @@ logger.setLevel(logging.INFO)
 OLLAMA_URL      = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
 MODEL_NAME      = "qwen:1.8b"
 WINDOW_SIZE     = 4       # Keep history small for fast prompt eval
-MAX_TOKENS      = 250     # Allows model to finish full sentences
+MAX_TOKENS      = 120     # Allows model to finish full sentences (shortened for faster TTS generation)
 TEMPERATURE     = 0.1     # Near-deterministic
 REQUEST_TIMEOUT = 300     # Wait for LLM as long as it takes
 
