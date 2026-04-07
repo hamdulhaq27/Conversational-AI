@@ -1,4 +1,4 @@
-# Natural Language Processing - Assignment 2
+# Natural Language Processing - Assignment 3
 ## Conversational AI System: Restaurant Reservation Assistant
 
 **Group Members:**
