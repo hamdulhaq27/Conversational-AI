@@ -54,8 +54,8 @@ def _next_field(memory: dict) -> str:
 def _collected_summary(memory: dict) -> str:
     """
     Summarise what has been collected so far.
-    • Vague period times ("evening") are excluded — they don't count as resolved.
-    • Optional fields (dietary_preferences, special_requests) are included if set.
+    Vague period times ("evening") are excluded — they don't count as resolved.
+    Optional fields (dietary_preferences, special_requests) are included if set.
     """
     _DISPLAY_KEYS = REQUIRED_FIELDS + ["dietary_preferences", "special_requests"]
     parts = []
@@ -88,87 +88,129 @@ def _history_block(recent_turns: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def build_system_prompt_text(memory: dict, recent_turns: list[dict],
-                             stage: str, modify_field: str | None = None) -> str:
-    """
-    Compact system prompt that still contains all required fields for tests:
-      - restaurant name, hours
-      - collected signals  (date, time, etc.)
-      - missing required fields  (name, guests, etc.)
-      - policy line
-      - stage/task instruction
-      - conversation history
-    """
+                             stage: str, retrieved_context: str = "",
+                             modify_field: str | None = None) -> str:
+
     next_f    = _next_field(memory)
     collected = _collected_summary(memory)
     missing   = _missing_summary(memory)
     history   = _history_block(recent_turns)
 
     field_questions = {
-        "date":   "Ask the customer what date they would like.",
-        "time":   "Ask the customer what specific time they would like (e.g. 7 PM, 8 PM).",
-        "guests": "Ask the customer how many guests.",
-        "name":   (
-            "Ask the customer for the name on the reservation and, "
-            "since this is the last required detail, also ask whether they have "
-            "any dietary preferences (vegetarian, halal, etc.) or special requests "
-            "(birthday, anniversary, window seat, etc.)."
-        ),
+        "date":   "Ask for the reservation date.",
+        "time":   "Ask for the exact time (e.g., 7 PM). Do not accept vague times like morning/evening.",
+        "guests": "Ask how many guests will be attending.",
+        "name":   "Ask for the reservation name only. Do NOT ask dietary or special requests yet.",
     }
 
     if stage == "greeting":
-        task = "Greet the customer briefly and ask how you can help."
+        task = "Greet the user briefly and ask how you can help with a reservation."
+
     elif stage == "collecting":
-        task = field_questions.get(next_f, "Ask for the next missing detail.")
+        task = field_questions.get(next_f, "Ask for the next missing reservation detail.")
+
     elif stage == "confirming":
-        task = f"Read back all details ({collected}) and ask the customer to confirm."
+        task = f"Repeat all collected reservation details clearly and ask for confirmation: {collected}"
+
     elif stage == "confirmed":
-        # Inject exact values directly — model must echo these in its reply
-        _date   = memory.get("date")   or "?"
-        _time   = memory.get("time")   or "?"
-        _guests = memory.get("guests") or "?"
-        _name   = memory.get("name")   or "?"
+        _date   = memory.get("date")   or "unknown"
+        _time   = memory.get("time")   or "unknown"
+        _guests = memory.get("guests") or "unknown"
+        _name   = memory.get("name")   or "unknown"
+
         task = (
-            f"Respond with ONE warm sentence confirming the reservation. "
-            f"You MUST include ALL of these exact details in your reply:\n"
-            f"  NAME={_name}  DATE={_date}  TIME={_time}  GUESTS={_guests}\n"
-            f'Example: "Your table for {_guests} on {_date} at {_time} under {_name} is confirmed!"'
+            "Confirm the reservation in ONE sentence only.\n"
+            "Include all details naturally in text (no labels like Name= or Date=).\n"
+            f"Details: Name {_name}, Date {_date}, Time {_time}, Guests {_guests}.\n"
+            "Do NOT add extra information."
         )
+
     elif stage == "modifying":
-        has_name = bool(memory.get("name"))
-        _mname   = memory.get("name") or "the customer"
-        if not has_name:
-            # Sub-state 1: need the booking name
-            task = "Ask for the name the reservation is under. One sentence only."
+        if not memory.get("name"):
+            task = "Ask for the name on the reservation."
         else:
-            # Sub-state 2: have the name, ask WHAT to change (field + new value)
-            task = (
-                f"You found {_mname}'s reservation. "
-                "Ask what they would like to change (date, time, or number of guests). "
-                "One sentence — do NOT suggest or mention any specific new value."
-            )
+            task = "Ask only which field they want to change: date, time, or guests. Do NOT ask anything else."
+
     elif stage == "cancelling":
-        task = ("Help cancel the reservation. "
-                "If no Name yet, ask for the Name on the booking. "
-                "Then confirm the cancellation.")
+        task = (
+            "If name is missing, ask for it. "
+            "If name is provided, confirm cancellation in ONE sentence only."
+        )
+
+    elif stage == "answering":
+        # Used by the RAG standalone retriever — answer purely from context
+        task = (
+            "Answer the customer's question using ONLY the RETRIEVED CONTEXT below. "
+            "If the answer is not in the context, say: "
+            "'I don't have that information in our restaurant details.' "
+            "Do NOT guess or add information not present in the context."
+        )
+
     else:
-        task = "Answer the customer's question about the restaurant in one sentence."
+        task = (
+            "Answer restaurant questions ONLY using the provided context. "
+            "If the answer is not in the context, say you don't have that information."
+        )
 
-    return f"""You are a reservation assistant at {RESTAURANT_INFO['name']} restaurant.
-Hours: {RESTAURANT_INFO['hours']} | Location: {RESTAURANT_INFO['location']}
-Lunch: {RESTAURANT_INFO['lunch_reservation']}
-Dinner: {RESTAURANT_INFO['dinner_reservation']}
-Parking: {RESTAURANT_INFO['parking']} | Dress: {RESTAURANT_INFO['dress_code']}
+    # Build the context block — only shown when context exists
+    context_block = ""
+    if retrieved_context and retrieved_context.strip():
+        context_block = f"""
+RETRIEVED CONTEXT (TRUTH SOURCE):
+{retrieved_context}
+"""
+    return f"""
+    You are a STRICT retrieval-only restaurant QA system.
 
-Policy: Reply in ONE short sentence only. No lists. No "Thank you for providing". No sign-offs. Do NOT use fake placeholders like [date] or [name]. If you don't know a detail, simply ASK the customer for it.
-Stage: {stage.upper()}
-Collected: {collected}
-Missing required fields: {missing}
+    ========================
+    ABSOLUTE RULE
+    ========================
+    You are ONLY allowed to use information from the RETRIEVED CONTEXT below.
 
-Recent conversation:
-{history}
+    You are STRICTLY FORBIDDEN from:
+    - Using general knowledge
+    - Using prior training data
+    - Guessing or completing missing information
+    - Adding any menu items not explicitly shown
 
-Task: {task}"""
+    If the answer is not explicitly present in the context, you MUST respond EXACTLY:
 
+    "Not available in the provided restaurant information."
+
+    ========================
+    RETRIEVED CONTEXT (ONLY SOURCE OF TRUTH)
+    ========================
+    {retrieved_context}
+
+    ========================
+    ANSWERING RULES
+    ========================
+    - Use ONLY words and facts found verbatim in the context
+    - Do NOT introduce new pasta types, dishes, or categories
+    - Do NOT paraphrase into new items
+    - Do NOT expand lists beyond context
+    - If context lists examples, you may ONLY repeat those examples
+    - If context is partial, you MUST say it's not available
+
+    ========================
+    OUTPUT FORMAT
+    ========================
+    - 1 to 3 short sentences maximum
+    - No explanations
+    - No extra formatting
+    - No assumptions
+
+    ========================
+    QUESTION
+    ========================
+    {task}
+
+    ========================
+    FINAL INSTRUCTION (HIGHEST PRIORITY)
+    ========================
+    If the answer is not explicitly present in RETRIEVED CONTEXT:
+    → Say: "Not available in the provided restaurant information."
+    """
 
 # ---------------------------------------------------------------------------
 # Few-shot message pairs — injected as real message turns in _build_messages
@@ -238,10 +280,7 @@ FEW_SHOT_CONFIRMED = [
     {"role": "assistant", "content": "Confirmed — your table for 4 on Friday at 8 PM under Omar Khan is all booked!"},
 ]
 
-
 # Modifying — Sub-state 1: no name yet, just ask for it
-# NOTE: examples must NOT exactly match test inputs or qwen:1.8b pattern-matches
-# the few-shot answer and returns empty for the real user message.
 FEW_SHOT_MODIFYING_NO_NAME = [
     {"role": "user",      "content": "I need to change something on my booking."},
     {"role": "assistant", "content": "Sure — what name is the reservation under?"},
@@ -299,8 +338,6 @@ def get_few_shot_examples(stage: str, memory: dict,
     elif stage == "confirmed":
         return FEW_SHOT_CONFIRMED
     elif stage == "modifying":
-        # Sub-state 1: no name yet; sub-state 2: have name, ask what to change.
-        # Sub-state 3 (done) is handled deterministically — no LLM call.
         return FEW_SHOT_MODIFYING_WHAT if memory.get("name") else FEW_SHOT_MODIFYING_NO_NAME
     elif stage == "cancelling":
         return FEW_SHOT_CANCELLING
@@ -314,9 +351,15 @@ def get_few_shot_examples(stage: str, memory: dict,
 
 def build_system_prompt(memory: dict, recent_turns: list[dict],
                         stage: str = "collecting",
+                        retrieved_context: str = "",
                         modify_field: str | None = None) -> str:
-    return build_system_prompt_text(memory, recent_turns, stage,
-                                    modify_field=modify_field)
+    return build_system_prompt_text(
+        memory,
+        recent_turns,
+        stage,
+        retrieved_context,
+        modify_field=modify_field
+    )
 
 def build_modification_prompt(memory: dict, recent_turns: list[dict],
                                modify_field: str | None = None) -> str:
