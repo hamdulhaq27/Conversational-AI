@@ -31,6 +31,7 @@ from prompt_templates import (
     build_confirmation_prompt,
     get_few_shot_examples,
 )
+from tools.crm import get_user, update_user
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -369,7 +370,7 @@ def _next_stage(session: dict, intent: str) -> str:
 # Message array construction
 # ===========================================================================
 
-def _build_messages(session: dict, user_message: str) -> list[dict]:
+def _build_messages(session: dict, user_message: str, session_id: str) -> list[dict]:
     stage        = session["stage"]
     memory       = session["memory"]
     modify_field = session.get("modify_field")
@@ -378,6 +379,11 @@ def _build_messages(session: dict, user_message: str) -> list[dict]:
 
     system_text = build_system_prompt(memory, window, stage=stage,
                                       modify_field=modify_field)
+
+    user_data = get_user(session_id)
+    user_info_text = json.dumps(user_data) if user_data else "No stored user info."
+    system_text += f"\n\nUser Info:\n{user_info_text}"
+
     messages = [{"role": "system", "content": system_text}]
 
     examples = get_few_shot_examples(stage, memory, modify_field=modify_field)
@@ -485,6 +491,112 @@ def _process_turn(session: dict, user_message: str) -> None:
 
 
 # ===========================================================================
+# Tool Orchestrator
+# ===========================================================================
+
+async def _run_tool_async(tool_fn, *args):
+    """Executes a tool asynchronously with a mandatory 2-second timeout guard."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(tool_fn, *args),
+            timeout=2.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("[TOOL ERROR] Tool execution timed out.")
+        return {"status": "error", "message": "Tool execution timed out."}
+    except Exception as e:
+        logger.error(f"[TOOL ERROR] Engine failure: {e}")
+        return {"status": "error", "message": "Tool execution failed."}
+
+
+def _safe_parse(text: str) -> dict | None:
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start != -1 and end != 0:
+            return json.loads(text[start:end])
+    except Exception:
+        pass
+    return None
+
+
+async def tool_orchestrator(session_id: str, user_message: str, extracted_memory: dict) -> list[dict]:
+    """
+    Acts as the Tool Orchestrator module.
+    Uses a fast LLM pass to decide if CRM (or other tools) should be invoked,
+    with Regex fallback for 1.8B reliability.
+    """
+    tool_prompt = [
+        {"role": "system", "content": f"""You are a Tool Orchestrator.
+Available Tools:
+1. update_user: Use if the user provides their name, dietary preferences, or special requests.
+   Args schema: {{"user_id": "{session_id}", "key": "<field>", "value": "<value>"}}
+
+If a tool should be called, output ONLY a JSON object:
+{{"tool": "<tool_name>", "args": {{...}}}}
+If no tool is needed, output exactly: NONE.
+"""},
+        {"role": "user", "content": "My name is Haider."},
+        {"role": "assistant", "content": f'{{"tool": "update_user", "args": {{"user_id": "{session_id}", "key": "name", "value": "Haider"}}}}'},
+        {"role": "user", "content": "Book a table for 2 for tomorrow."},
+        {"role": "assistant", "content": "NONE"},
+        {"role": "user", "content": "I am allergic to peanuts."},
+        {"role": "assistant", "content": f'{{"tool": "update_user", "args": {{"user_id": "{session_id}", "key": "dietary_preferences", "value": "peanut allergy"}}}}'},
+        {"role": "user", "content": user_message}
+    ]
+
+    payload = {
+        "model": MODEL_NAME,
+        "messages": tool_prompt,
+        "stream": False,
+        "options": {"num_predict": 60, "temperature": 0.0}
+    }
+
+    import httpx
+
+    tool_call = None
+
+    # 1. LLM Decision Phase
+    try:
+        client = await _get_client()
+        resp = await client.post(OLLAMA_URL, json=payload, timeout=20.0)
+        resp.raise_for_status()
+        text = resp.json().get("message", {}).get("content", "").strip()
+
+        if text != "NONE":
+            tool_call = _safe_parse(text)
+    except Exception as e:
+        logger.warning(f"[ORCHESTRATOR] LLM logic failed or skipped: {e}")
+
+    # 2. Hybrid Regex Fallback
+    if not tool_call:
+        if extracted_memory.get("name"):
+            logger.info("[FALLBACK] Regex fallback used for name CRM update")
+            tool_call = {"tool": "update_user", "args": {"user_id": session_id, "key": "name", "value": extracted_memory["name"]}}
+        elif extracted_memory.get("dietary_preferences"):
+            logger.info("[FALLBACK] Regex fallback used for dietary_preferences CRM update")
+            tool_call = {"tool": "update_user", "args": {"user_id": session_id, "key": "dietary_preferences", "value": extracted_memory["dietary_preferences"]}}
+        elif extracted_memory.get("special_requests"):
+            logger.info("[FALLBACK] Regex fallback used for special_requests CRM update")
+            tool_call = {"tool": "update_user", "args": {"user_id": session_id, "key": "special_requests", "value": extracted_memory["special_requests"]}}
+
+    # 3. Execution Phase
+    if tool_call and isinstance(tool_call, dict):
+        tool = tool_call.get("tool")
+        args = tool_call.get("args", {})
+        logger.info(f"[TOOL EXECUTED] {tool} -> {args}")
+
+        if tool == "update_user" and "user_id" in args:
+            res = await _run_tool_async(update_user, args.get("user_id"), args.get("key"), args.get("value"))
+            return [
+                {"role": "assistant", "content": f"Invoking Tool: {tool}"},
+                {"role": "tool", "content": f"Tool Result:\n{json.dumps(res)}"}
+            ]
+
+    return []
+
+
+# ===========================================================================
 # Main entry points
 # ===========================================================================
 
@@ -501,9 +613,15 @@ async def chat_stream(session_id: str, user_message: str):
     # ── Deterministic shortcut: simple greetings ─────────────────────────────
     if _is_greeting(user_message):
         logger.info(f"[SERVER] [{session_id}] Greeting detected — returning instant reply (no LLM)")
+        user_data = get_user(session_id)
+        if user_data.get("name"):
+            greeting = f"Welcome back {user_data['name']}! — would you like to make a reservation, or do you have a question about the restaurant?"
+        else:
+            greeting = GREETING_REPLY
+
         session["history"].append({"role": "user",      "content": user_message})
-        session["history"].append({"role": "assistant", "content": GREETING_REPLY})
-        yield GREETING_REPLY
+        session["history"].append({"role": "assistant", "content": greeting})
+        yield greeting
         return
 
     # Hard guardrail — no LLM call for off-topic messages
@@ -521,9 +639,17 @@ async def chat_stream(session_id: str, user_message: str):
     logger.info(f"[SERVER] [{session_id}] Stage: {stage} | Intent: {session['intent']} | Memory: {memory}")
 
     # ══════════════════════════════════════════════════════════════════════════
+    # TOOL ORCHESTRATION LAYER (PRE-GENERATION LLM DECISION)
+    # ══════════════════════════════════════════════════════════════════════════
+    tool_messages = await tool_orchestrator(session_id, user_message, session["memory"])
+
+    # ══════════════════════════════════════════════════════════════════════════
     # LLM CALL — generates answers directly based on the system prompt context
     # ══════════════════════════════════════════════════════════════════════════
-    messages = _build_messages(session, user_message)
+    messages = _build_messages(session, user_message, session_id)
+
+    if tool_messages:
+        messages = messages[:-1] + tool_messages + [messages[-1]]
 
     payload = {
         "model":      MODEL_NAME,

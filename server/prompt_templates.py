@@ -27,6 +27,14 @@ REQUIRED_FIELDS = ["date", "time", "guests", "name"]
 # Vague time words that need a specific-time follow-up (e.g. "evening" → "7 PM?")
 _VAGUE_TIMES = {"evening", "morning", "afternoon"}
 
+CRM_PROMPT = """
+You can use CRM functions:
+1. get_user(user_id)
+2. update_user(user_id, key, value)
+If user provides personal info, store it.
+If user returns, use their info.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -210,6 +218,8 @@ RETRIEVED CONTEXT (TRUTH SOURCE):
     ========================
     If the answer is not explicitly present in RETRIEVED CONTEXT:
     → Say: "Not available in the provided restaurant information."
+
+    {CRM_PROMPT}
     """
 
 # ---------------------------------------------------------------------------
