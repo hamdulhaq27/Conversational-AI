@@ -25,10 +25,10 @@ The assistant is designed to simulate a practical front-desk workflow with:
 - **FastAPI + WebSocket (`server/api.py`)**: accepts chat requests, manages sessions, and streams generated tokens back to UI.
 - **Conversation Manager (`server/conversation_manager.py`)**: handles state machine transitions, intent detection, slot extraction, prompt assembly, and Ollama streaming calls.
 - **Prompt Templates (`server/prompt_templates.py`)**: contains stage-specific prompt logic and few-shot behavior constraints.
-- **LLM Engine (Ollama: `qwen:1.8b`)**: local CPU inference backend for response generation.
+- **LLM Engine (Ollama: `qwen2.5:3b-instruct`)**: local CPU inference backend for response generation.
 
 ## Model Selection
-- **Model**: `qwen:1.8b`
+- **Model**: `qwen2.5:3b-instruct`
 - **Runtime**: Ollama local inference
 - **Why this choice**:
   - lightweight enough for CPU-only environments,
@@ -89,7 +89,7 @@ The backend includes several practical latency optimizations:
 3. Pull model once:
 
 ```bash
-ollama pull qwen:1.8b
+ollama pull qwen2.5:3b-instruct
 ```
 
 ### Run the System
