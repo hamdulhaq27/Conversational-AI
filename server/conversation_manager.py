@@ -49,10 +49,10 @@ logger.setLevel(logging.INFO)
 # Configuration
 # ---------------------------------------------------------------------------
 OLLAMA_URL      = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
-MODEL_NAME      = "qwen:1.8b"
-WINDOW_SIZE     = 4       # Keep history small for fast prompt eval
-MAX_TOKENS      = 100     # Enough for a complete sentence, not an essay
-TEMPERATURE     = 0.1     # Near-deterministic
+MODEL_NAME      = "qwen2.5:3b-instruct"
+WINDOW_SIZE     = 5       # Keep history small for fast prompt eval
+MAX_TOKENS      = 180     # Enough for a complete sentence, not an essay
+TEMPERATURE     = 0.2     # Near-deterministic
 REQUEST_TIMEOUT = 300
 
 _sessions: dict[str, dict] = {}
