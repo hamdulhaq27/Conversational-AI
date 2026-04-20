@@ -3,9 +3,11 @@ Phase III - Prompt Templates
 Restaurant Reservation Conversational AI
 
 Strategy for qwen:1.8b:
-  - System prompt is SHORT and direct
-  - Few-shot examples injected as real message turns (not text in system prompt)
-  - Stage-specific examples so the model always sees the exact pattern to copy
+  - System prompt is stage-specific and SHORT (model gets confused by long prompts)
+  - NO "retrieval-only" framing on reservation stages — that causes hallucination
+  - RAG context only injected on general/answering stages, not during booking flow
+  - Few-shot examples injected as real message turns (NOT in system prompt text)
+  - Each stage has a clear, single task sentence
 """
 
 RESTAURANT_INFO = {
@@ -24,16 +26,10 @@ RESTAURANT_INFO = {
 SIGNAL_KEYS     = ["date", "time", "guests", "name", "dietary_preferences", "special_requests"]
 REQUIRED_FIELDS = ["date", "time", "guests", "name"]
 
-# Vague time words that need a specific-time follow-up (e.g. "evening" → "7 PM?")
+# Vague time words that need a specific-time follow-up
 _VAGUE_TIMES = {"evening", "morning", "afternoon"}
 
-CRM_PROMPT = """
-You can use CRM functions:
-1. get_user(user_id)
-2. update_user(user_id, key, value)
-If user provides personal info, store it.
-If user returns, use their info.
-"""
+CRM_PROMPT = ""  # Kept for import compatibility — CRM is handled by tool orchestrator
 
 
 # ---------------------------------------------------------------------------
@@ -41,18 +37,13 @@ If user returns, use their info.
 # ---------------------------------------------------------------------------
 
 def _missing_fields(memory: dict) -> list[str]:
-    """
-    Return required fields that are still unresolved.
-    Vague period words ("evening", "morning", "afternoon") count as unresolved
-    because the model must ask for a specific clock time.
-    """
     missing = []
     for k in REQUIRED_FIELDS:
         v = memory.get(k)
         if not v:
             missing.append(k)
         elif k == "time" and str(v).lower() in _VAGUE_TIMES:
-            missing.append(k)   # treat vague period as still missing
+            missing.append(k)
     return missing
 
 def _next_field(memory: dict) -> str:
@@ -60,11 +51,6 @@ def _next_field(memory: dict) -> str:
     return m[0] if m else ""
 
 def _collected_summary(memory: dict) -> str:
-    """
-    Summarise what has been collected so far.
-    Vague period times ("evening") are excluded — they don't count as resolved.
-    Optional fields (dietary_preferences, special_requests) are included if set.
-    """
     _DISPLAY_KEYS = REQUIRED_FIELDS + ["dietary_preferences", "special_requests"]
     parts = []
     for k in _DISPLAY_KEYS:
@@ -72,7 +58,7 @@ def _collected_summary(memory: dict) -> str:
         if not v:
             continue
         if k == "time" and str(v).lower() in _VAGUE_TIMES:
-            continue   # don't show unresolved vague time as collected
+            continue
         parts.append(f"{k}: {v}")
     return ", ".join(parts) if parts else "nothing yet"
 
@@ -81,7 +67,6 @@ def _missing_summary(memory: dict) -> str:
     return ", ".join(missing) if missing else "none"
 
 def _history_block(recent_turns: list[dict]) -> str:
-    """Render conversation history as labelled turns — used in system prompt text."""
     if not recent_turns:
         return "(no prior turns)"
     lines = []
@@ -92,7 +77,7 @@ def _history_block(recent_turns: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# System prompt — short but complete enough for all test assertions
+# System prompt — stage-specific, SHORT, no contradictory framing
 # ---------------------------------------------------------------------------
 
 def build_system_prompt_text(memory: dict, recent_turns: list[dict],
@@ -101,137 +86,134 @@ def build_system_prompt_text(memory: dict, recent_turns: list[dict],
 
     next_f    = _next_field(memory)
     collected = _collected_summary(memory)
-    missing   = _missing_summary(memory)
-    history   = _history_block(recent_turns)
 
-    field_questions = {
-        "date":   "Ask for the reservation date.",
-        "time":   "Ask for the exact time (e.g., 7 PM). Do not accept vague times like morning/evening.",
-        "guests": "Ask how many guests will be attending.",
-        "name":   "Ask for the reservation name only. Do NOT ask dietary or special requests yet.",
-    }
-
+    # ── RESERVATION STAGES — no RAG framing, pure conversational ────────────
     if stage == "greeting":
-        task = "Greet the user briefly and ask how you can help with a reservation."
+        return (
+            "You are a friendly host at La Bella Tavola Italian restaurant. "
+            "Greet the customer warmly in one sentence and ask how you can help."
+        )
 
     elif stage == "collecting":
-        task = field_questions.get(next_f, "Ask for the next missing reservation detail.")
+        field_prompts = {
+            "date":   "You are taking a reservation at La Bella Tavola. Ask only: what date?",
+            "time":   "You are taking a reservation at La Bella Tavola. Ask only: what time? (needs a specific time like 7 PM, not just 'evening')",
+            "guests": "You are taking a reservation at La Bella Tavola. Ask only: how many guests?",
+            "name":   "You are taking a reservation at La Bella Tavola. Ask for the name and any dietary preferences or special requests.",
+        }
+        return field_prompts.get(next_f, "You are taking a reservation. Ask for the next missing detail.")
 
     elif stage == "confirming":
-        task = f"Repeat all collected reservation details clearly and ask for confirmation: {collected}"
+        return (
+            f"You are confirming a reservation at La Bella Tavola. "
+            f"Repeat these details and ask if correct: {collected}. "
+            "One sentence only."
+        )
 
     elif stage == "confirmed":
-        _date   = memory.get("date")   or "unknown"
-        _time   = memory.get("time")   or "unknown"
-        _guests = memory.get("guests") or "unknown"
-        _name   = memory.get("name")   or "unknown"
-
-        task = (
-            "Confirm the reservation in ONE sentence only.\n"
-            "Include all details naturally in text (no labels like Name= or Date=).\n"
-            f"Details: Name {_name}, Date {_date}, Time {_time}, Guests {_guests}.\n"
-            "Do NOT add extra information."
+        _date   = memory.get("date")   or "the date"
+        _time   = memory.get("time")   or "the time"
+        _guests = memory.get("guests") or "your group"
+        _name   = memory.get("name")   or "you"
+        extras  = []
+        if memory.get("dietary_preferences"):
+            extras.append(memory["dietary_preferences"])
+        if memory.get("special_requests"):
+            extras.append(memory["special_requests"])
+        extra_str = f", {', '.join(extras)}" if extras else ""
+        return (
+            f"Confirm the reservation in ONE short sentence: "
+            f"table for {_guests} on {_date} at {_time} under {_name}{extra_str}. "
+            "End warmly. No extra questions."
         )
 
     elif stage == "modifying":
         if not memory.get("name"):
-            task = "Ask for the name on the reservation."
+            return (
+                "A customer wants to modify their reservation at La Bella Tavola. "
+                "Ask only: what name is the reservation under?"
+            )
         else:
-            task = "Ask only which field they want to change: date, time, or guests. Do NOT ask anything else."
+            if modify_field and memory.get(modify_field):
+                field_label = {"date": "date", "time": "time", "guests": "number of guests"}.get(
+                    modify_field, modify_field
+                )
+                return (
+                    f"Confirm the reservation change for {memory.get('name')}: "
+                    f"{field_label} updated to {memory.get(modify_field)}. One sentence."
+                )
+            return (
+                f"You have the reservation for {memory.get('name')}. "
+                "Ask only: what would you like to change — the date, the time, or the number of guests?"
+            )
 
     elif stage == "cancelling":
-        task = (
-            "If name is missing, ask for it. "
-            "If name is provided, confirm cancellation in ONE sentence only."
-        )
+        if not memory.get("name"):
+            return (
+                "A customer wants to cancel their reservation. "
+                "Ask only: what name is it under?"
+            )
+        else:
+            return (
+                f"Confirm cancellation of {memory.get('name')}'s reservation in one friendly sentence."
+            )
 
-    elif stage == "answering":
-        # Used by the RAG standalone retriever — answer purely from context
-        task = (
-            "Answer the customer's question using ONLY the RETRIEVED CONTEXT below. "
-            "If the answer is not in the context, say: "
-            "'I don't have that information in our restaurant details.' "
-            "Do NOT guess or add information not present in the context."
-        )
-
+    # ── GENERAL / ANSWERING — inject tool result or RAG context ─────────────
     else:
-        task = (
-            "Answer restaurant questions ONLY using the provided context. "
-            "If the answer is not in the context, say you don't have that information."
+        # Build restaurant facts as fallback even without RAG
+        facts = (
+            "La Bella Tavola — Italian-Mediterranean restaurant. "
+            "Open 12 PM–11 PM daily. Located at 123 Main Street, Downtown. "
+            "Phone: +1-800-555-1234. Smart casual dress code. "
+            "Street parking, valet on weekends. Up to 8 guests per table."
         )
 
-    # Build the context block — only shown when context exists
-    context_block = ""
-    if retrieved_context and retrieved_context.strip():
-        context_block = f"""
-RETRIEVED CONTEXT (TRUTH SOURCE):
-{retrieved_context}
-"""
-    return f"""
-    You are a STRICT retrieval-only restaurant QA system.
+        base = (
+            "You are a helpful assistant for La Bella Tavola restaurant. "
+            "Answer the customer's question in 1–3 sentences using only the information below. "
+            "If the answer is not there, say: 'I don't have that detail — please call us on +1-800-555-1234.'\n\n"
+        )
 
-    ========================
-    ABSOLUTE RULE
-    ========================
-    You are ONLY allowed to use information from the RETRIEVED CONTEXT below.
+        if retrieved_context and retrieved_context.strip():
+            base += f"INFORMATION:\n{retrieved_context}\n"
+        else:
+            base += f"INFORMATION:\n{facts}\n"
 
-    You are STRICTLY FORBIDDEN from:
-    - Using general knowledge
-    - Using prior training data
-    - Guessing or completing missing information
-    - Adding any menu items not explicitly shown
+        return base
 
-    If the answer is not explicitly present in the context, you MUST respond EXACTLY:
 
-    "Not available in the provided restaurant information."
+def build_system_prompt(memory: dict, recent_turns: list[dict],
+                        stage: str = "collecting",
+                        retrieved_context: str = "",
+                        modify_field: str | None = None) -> str:
+    return build_system_prompt_text(
+        memory, recent_turns, stage,
+        retrieved_context=retrieved_context,
+        modify_field=modify_field
+    )
 
-    ========================
-    RETRIEVED CONTEXT (ONLY SOURCE OF TRUTH)
-    ========================
-    {retrieved_context}
+def build_modification_prompt(memory: dict, recent_turns: list[dict],
+                               modify_field: str | None = None) -> str:
+    return build_system_prompt_text(memory, recent_turns, "modifying",
+                                    modify_field=modify_field)
 
-    ========================
-    ANSWERING RULES
-    ========================
-    - Use ONLY words and facts found verbatim in the context
-    - Do NOT introduce new pasta types, dishes, or categories
-    - Do NOT paraphrase into new items
-    - Do NOT expand lists beyond context
-    - If context lists examples, you may ONLY repeat those examples
-    - If context is partial, you MUST say it's not available
+def build_cancellation_prompt(memory: dict, recent_turns: list[dict]) -> str:
+    return build_system_prompt_text(memory, recent_turns, "cancelling")
 
-    ========================
-    OUTPUT FORMAT
-    ========================
-    - 1 to 3 short sentences maximum
-    - No explanations
-    - No extra formatting
-    - No assumptions
+def build_confirmation_prompt(memory: dict, recent_turns: list[dict]) -> str:
+    return build_system_prompt_text(memory, recent_turns, "confirming")
 
-    ========================
-    QUESTION
-    ========================
-    {task}
-
-    ========================
-    FINAL INSTRUCTION (HIGHEST PRIORITY)
-    ========================
-    If the answer is not explicitly present in RETRIEVED CONTEXT:
-    → Say: "Not available in the provided restaurant information."
-
-    {CRM_PROMPT}
-    """
 
 # ---------------------------------------------------------------------------
-# Few-shot message pairs — injected as real message turns in _build_messages
-# This is what actually controls qwen:1.8b's response style
+# Few-shot message pairs — these are what actually steer Qwen 1.8B
+# Keep them SHORT and concrete — model copies the pattern exactly
 # ---------------------------------------------------------------------------
 
 FEW_SHOT_GREETING = [
-    {"role": "user",      "content": "Hi, I'd like to book a table."},
-    {"role": "assistant", "content": "Sure! What date did you have in mind?"},
-    {"role": "user",      "content": "Hello, can I make a reservation?"},
-    {"role": "assistant", "content": "Of course — what date works for you?"},
+    {"role": "user",      "content": "Hi"},
+    {"role": "assistant", "content": "Welcome to La Bella Tavola! Would you like to make a reservation or do you have a question?"},
+    {"role": "user",      "content": "Hello, can I book a table?"},
+    {"role": "assistant", "content": "Of course! What date were you thinking?"},
 ]
 
 FEW_SHOT_DATE = [
@@ -243,100 +225,117 @@ FEW_SHOT_DATE = [
 
 FEW_SHOT_TIME = [
     {"role": "user",      "content": "March 15th."},
-    {"role": "assistant", "content": "Great, what time on March 15th?"},
+    {"role": "assistant", "content": "Great — what time on March 15th?"},
+    {"role": "user",      "content": "Tomorrow evening."},
+    {"role": "assistant", "content": "Tomorrow evening — what time exactly, like 7 or 8 PM?"},
     {"role": "user",      "content": "This Saturday."},
     {"role": "assistant", "content": "Saturday it is — what time were you thinking?"},
-    {"role": "user",      "content": "Tomorrow evening."},
-    {"role": "assistant", "content": "Tomorrow evening works — what time exactly, like 7 or 8 PM?"},
-    {"role": "user",      "content": "Sometime in the morning."},
-    {"role": "assistant", "content": "Morning it is — what time were you thinking, around 11 AM or noon?"},
 ]
 
 FEW_SHOT_GUESTS = [
     {"role": "user",      "content": "7 PM."},
-    {"role": "assistant", "content": "Perfect. How many guests will that be?"},
-    {"role": "user",      "content": "Around 8 in the evening."},
-    {"role": "assistant", "content": "Got it — and how many people?"},
+    {"role": "assistant", "content": "Perfect. How many guests?"},
+    {"role": "user",      "content": "8 PM works."},
+    {"role": "assistant", "content": "Got it — how many people will be joining?"},
 ]
 
 FEW_SHOT_NAME = [
-    {"role": "user",      "content": "Just the two of us."},
-    {"role": "assistant", "content": "Perfect — what name for the booking, and any dietary preferences or special requests?"},
+    {"role": "user",      "content": "Just 2 of us."},
+    {"role": "assistant", "content": "Table for 2 — what name for the booking, and any dietary preferences or special requests?"},
     {"role": "user",      "content": "4 people."},
-    {"role": "assistant", "content": "Table for 4 — what name for the reservation, and any dietary needs or special occasions?"},
+    {"role": "assistant", "content": "Table for 4 — what name, and any dietary needs or special occasions?"},
     {"role": "user",      "content": "3 guests."},
-    {"role": "assistant", "content": "Got it, 3 guests — what name should I use, and do you have any dietary requirements or special requests?"},
+    {"role": "assistant", "content": "Got it — what name should I put the reservation under? Any dietary needs?"},
 ]
 
 FEW_SHOT_CONFIRMING = [
     {"role": "user",      "content": "Ahmed Khan, no dietary needs."},
-    {"role": "assistant", "content": "So that's a table for 4 on tomorrow at 7 PM under Ahmed Khan — shall I confirm that?"},
+    {"role": "assistant", "content": "So that's a table for 4 on Saturday at 7 PM under Ahmed Khan — shall I confirm?"},
     {"role": "user",      "content": "Sara Ali, I'm vegetarian."},
-    {"role": "assistant", "content": "Table for 2 on Saturday at 8 PM under Sara Ali, vegetarian noted — does that look right?"},
+    {"role": "assistant", "content": "Table for 2 on Friday at 8 PM under Sara Ali, vegetarian noted — does that look right?"},
     {"role": "user",      "content": "Bilal Ahmed."},
-    {"role": "assistant", "content": "So that's a table for 2 on March 20 at 8 PM under Bilal Ahmed — shall I confirm that?"},
+    {"role": "assistant", "content": "Table for 2 on March 20 at 8 PM under Bilal Ahmed — shall I confirm?"},
 ]
 
 FEW_SHOT_CONFIRMED = [
-    {"role": "user",      "content": "Yes, that's correct."},
-    {"role": "assistant", "content": "All set — your table for 4 on tomorrow at 7 PM under Ahmed Khan is confirmed, see you then!"},
+    {"role": "user",      "content": "Yes, confirm please."},
+    {"role": "assistant", "content": "All set — your table for 4 on Saturday at 7 PM under Ahmed Khan is confirmed, see you then!"},
     {"role": "user",      "content": "Perfect, go ahead."},
-    {"role": "assistant", "content": "Confirmed! Your table for 2 on March 20 at 8 PM under Bilal Ahmed is booked — see you soon!"},
-    {"role": "user",      "content": "Can you confirm what you have so far?"},
-    {"role": "assistant", "content": "Of course — your table for 2 on March 20 at 8 PM under Bilal Ahmed is confirmed!"},
-    {"role": "user",      "content": "Yes go ahead and book it."},
-    {"role": "assistant", "content": "Done! Your table for 3 on Saturday at 7 PM under Sara Ali is confirmed!"},
-    {"role": "user",      "content": "Yes please confirm."},
-    {"role": "assistant", "content": "Confirmed — your table for 4 on Friday at 8 PM under Omar Khan is all booked!"},
+    {"role": "assistant", "content": "Confirmed! Table for 2 on March 20 at 8 PM under Bilal Ahmed is booked — see you soon!"},
+    {"role": "user",      "content": "Yes that's right."},
+    {"role": "assistant", "content": "Wonderful — your table for 3 on Sunday at 7 PM under Sara Ali is all set!"},
 ]
 
-# Modifying — Sub-state 1: no name yet, just ask for it
 FEW_SHOT_MODIFYING_NO_NAME = [
-    {"role": "user",      "content": "I need to change something on my booking."},
+    {"role": "user",      "content": "I need to change my booking."},
     {"role": "assistant", "content": "Sure — what name is the reservation under?"},
-    {"role": "user",      "content": "I want to update my reservation details."},
+    {"role": "user",      "content": "I want to update my reservation."},
     {"role": "assistant", "content": "Of course — what name is the booking under?"},
-    {"role": "user",      "content": "Can I make a change to my reservation?"},
-    {"role": "assistant", "content": "Happy to help — what name is the booking under?"},
 ]
 
-# Modifying — Sub-state 2: have the name, ask WHAT to change
 FEW_SHOT_MODIFYING_WHAT = [
     {"role": "user",      "content": "It's under Ali Raza."},
-    {"role": "assistant", "content": "Got it — I have Ali Raza's reservation. What would you like to change: the date, the time, or the number of guests?"},
-    {"role": "user",      "content": "The name is Omar Khan."},
-    {"role": "assistant", "content": "Found it — Omar Khan's reservation is here. What would you like to update: date, time, or guest count?"},
+    {"role": "assistant", "content": "Got it — what would you like to change: the date, the time, or the number of guests?"},
     {"role": "user",      "content": "My name is Sara Ahmed."},
-    {"role": "assistant", "content": "Got Sara Ahmed's reservation — what would you like to change: the date, the time, or the number of guests?"},
+    {"role": "assistant", "content": "Found Sara Ahmed's reservation — what would you like to update: date, time, or guest count?"},
 ]
 
-# Keep legacy alias
-FEW_SHOT_MODIFYING = FEW_SHOT_MODIFYING_NO_NAME
+FEW_SHOT_MODIFYING = FEW_SHOT_MODIFYING_NO_NAME  # legacy alias
 
 FEW_SHOT_CANCELLING = [
     {"role": "user",      "content": "I want to cancel my reservation."},
     {"role": "assistant", "content": "No problem — what name is the booking under?"},
-    {"role": "user",      "content": "Omar Khan, March 10 at 7 PM."},
-    {"role": "assistant", "content": "Done — Omar Khan's reservation for March 10 at 7 PM has been cancelled."},
+    {"role": "user",      "content": "Omar Khan."},
+    {"role": "assistant", "content": "Done — Omar Khan's reservation has been cancelled. We hope to see you another time!"},
 ]
 
 FEW_SHOT_GENERAL = [
     {"role": "user",      "content": "What time do you open?"},
     {"role": "assistant", "content": "We're open every day from 12 PM to 11 PM."},
-    {"role": "user",      "content": "Do I need a reservation for lunch?"},
-    {"role": "assistant", "content": "Walk-ins are welcome for lunch, though we recommend booking on weekends."},
     {"role": "user",      "content": "Is there parking?"},
-    {"role": "assistant", "content": "Yes, street parking is available and we offer valet on weekends."},
-    {"role": "user",      "content": "What's the dress code?"},
-    {"role": "assistant", "content": "Smart casual — no sportswear, nothing too formal."},
+    {"role": "assistant", "content": "Yes — street parking is available, and we offer valet on weekends."},
     {"role": "user",      "content": "What cuisine do you serve?"},
     {"role": "assistant", "content": "Italian-Mediterranean — fresh pasta, grilled meats, and seafood."},
+    {"role": "user",      "content": "Do I need a reservation for lunch?"},
+    {"role": "assistant", "content": "Walk-ins are welcome for lunch, though we recommend booking on weekends."},
+]
+
+# Tool-result few-shots — used when a tool just ran
+FEW_SHOT_TOOL_MENU = [
+    {"role": "user",      "content": "What pasta dishes do you have?"},
+    {"role": "assistant", "content": "We have Tagliatelle al Ragù Bolognese ($20), Spaghetti ai Frutti di Mare ($22), and Fettuccine Alfredo ($18), among others. Would you like more details?"},
+    {"role": "user",      "content": "Do you have vegetarian options?"},
+    {"role": "assistant", "content": "Yes — vegetarian options include Bruschetta al Pomodoro ($9), Burrata and Heirloom Tomatoes ($14), and Arancini Siciliani ($11). Shall I list more?"},
+]
+
+FEW_SHOT_TOOL_WEATHER = [
+    {"role": "user",      "content": "What's the weather like?"},
+    {"role": "assistant", "content": "It's currently 18°C and clear — outdoor seating looks great today!"},
+    {"role": "user",      "content": "Is outdoor seating a good idea?"},
+    {"role": "assistant", "content": "It's a bit rainy right now, so our indoor tables would be more comfortable today."},
+]
+
+FEW_SHOT_TOOL_LOOKUP = [
+    {"role": "user",      "content": "Check my reservation under Ahmed."},
+    {"role": "assistant", "content": "I found a reservation for Ahmed on Friday at 7 PM for 4 guests — is that the one?"},
+    {"role": "user",      "content": "Do I have a booking?"},
+    {"role": "assistant", "content": "I couldn't find a reservation under that name. Would you like to make a new booking?"},
 ]
 
 
 def get_few_shot_examples(stage: str, memory: dict,
-                          modify_field: str | None = None) -> list[dict]:
-    """Return the right few-shot message pairs for the current stage."""
+                          modify_field: str | None = None,
+                          tool_used: str | None = None) -> list[dict]:
+    """Return the right few-shot message pairs for the current stage/tool."""
+
+    # Tool-specific few-shots take priority
+    if tool_used == "search_menu":
+        return FEW_SHOT_TOOL_MENU
+    if tool_used == "get_weather":
+        return FEW_SHOT_TOOL_WEATHER
+    if tool_used == "lookup_reservation":
+        return FEW_SHOT_TOOL_LOOKUP
+
     next_f = _next_field(memory)
     if stage == "greeting":
         return FEW_SHOT_GREETING
@@ -353,31 +352,3 @@ def get_few_shot_examples(stage: str, memory: dict,
         return FEW_SHOT_CANCELLING
     else:
         return FEW_SHOT_GENERAL
-
-
-# ---------------------------------------------------------------------------
-# Public builders — used by conversation_manager
-# ---------------------------------------------------------------------------
-
-def build_system_prompt(memory: dict, recent_turns: list[dict],
-                        stage: str = "collecting",
-                        retrieved_context: str = "",
-                        modify_field: str | None = None) -> str:
-    return build_system_prompt_text(
-        memory,
-        recent_turns,
-        stage,
-        retrieved_context,
-        modify_field=modify_field
-    )
-
-def build_modification_prompt(memory: dict, recent_turns: list[dict],
-                               modify_field: str | None = None) -> str:
-    return build_system_prompt_text(memory, recent_turns, "modifying",
-                                    modify_field=modify_field)
-
-def build_cancellation_prompt(memory: dict, recent_turns: list[dict]) -> str:
-    return build_system_prompt_text(memory, recent_turns, "cancelling")
-
-def build_confirmation_prompt(memory: dict, recent_turns: list[dict]) -> str:
-    return build_system_prompt_text(memory, recent_turns, "confirming")

@@ -3,13 +3,14 @@ Phase III - Conversation Manager
 Restaurant Reservation Conversational AI
 
 Performance-tuned for qwen:1.8b on CPU:
+  - PURE REGEX tool detection — no second LLM call for tools (eliminates ~3s latency)
+  - Tool result + RAG run in PARALLEL via asyncio.gather before LLM call
+  - LRU cache for tool results (weather 5 min, menu permanent, lookup 30 s)
+  - Stage-specific system prompts (no contradictory "retrieval-only" framing)
   - Few-shot examples injected as real message turns
-  - System prompt kept short
-  - Stop tokens aggressively cut off verbosity
-  - Intent sticky-lock prevents cancel/modify intent being overwritten
-  - Model pre-warmed on module load to eliminate cold-start
-  - Persistent HTTP client to avoid TCP overhead
-  - Aggressive token cap (40 tokens) for fast CPU generation
+  - Model pre-warmed on module load
+  - Persistent HTTP client, sliding window history
+  - Streaming preserved (word-by-word)
 """
 
 import os
@@ -19,7 +20,9 @@ import json
 import time
 import logging
 import asyncio
+import hashlib
 from typing import Generator
+from functools import lru_cache
 
 from prompt_templates import (
     SIGNAL_KEYS,
@@ -32,6 +35,9 @@ from prompt_templates import (
     get_few_shot_examples,
 )
 from tools.crm import get_user, update_user
+from tools.weather import get_weather, RESTAURANT_CITY
+from tools.menu import search_menu
+from tools.reservation_lookup import lookup_reservation, save_reservation
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -45,14 +51,81 @@ logger.setLevel(logging.INFO)
 OLLAMA_URL      = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
 MODEL_NAME      = "qwen:1.8b"
 WINDOW_SIZE     = 4       # Keep history small for fast prompt eval
-MAX_TOKENS      = 120     # Allows model to finish full sentences (shortened for faster TTS generation)
+MAX_TOKENS      = 100     # Enough for a complete sentence, not an essay
 TEMPERATURE     = 0.1     # Near-deterministic
-REQUEST_TIMEOUT = 300     # Wait for LLM as long as it takes
+REQUEST_TIMEOUT = 300
 
 _sessions: dict[str, dict] = {}
 
 # ---------------------------------------------------------------------------
-# Persistent HTTP client — avoids TCP handshake on every request
+# Simple TTL cache for tool results (avoids repeated API / DB hits)
+# ---------------------------------------------------------------------------
+_tool_cache: dict[str, tuple[float, dict]] = {}
+
+def _cache_get(key: str, ttl: float) -> dict | None:
+    entry = _tool_cache.get(key)
+    if entry and (time.time() - entry[0]) < ttl:
+        return entry[1]
+    return None
+
+def _cache_set(key: str, value: dict) -> None:
+    _tool_cache[key] = (time.time(), value)
+
+
+# ---------------------------------------------------------------------------
+# RAG — lazy singleton
+# ---------------------------------------------------------------------------
+_rag_system = None
+_rag_initialized = False
+
+def _get_rag():
+    global _rag_system, _rag_initialized
+    if _rag_initialized:
+        return _rag_system
+    _rag_initialized = True
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from rag.retriever import RestaurantRAG
+        _rag_system = RestaurantRAG()
+        logger.info("[RAG] RestaurantRAG singleton initialized.")
+    except Exception as e:
+        logger.warning(f"[RAG] Could not initialize — RAG disabled: {e}")
+        _rag_system = None
+    return _rag_system
+
+
+def _fetch_rag_context(query: str) -> str:
+    """Retrieve top-k chunks. Cached by query hash for 5 minutes."""
+    cache_key = f"rag:{hashlib.md5(query.encode()).hexdigest()}"
+    cached = _cache_get(cache_key, ttl=300)
+    if cached is not None:
+        logger.info(f"[RAG] Cache hit for query: '{query[:40]}'")
+        return cached.get("context", "")
+
+    rag = _get_rag()
+    if rag is None:
+        return ""
+    try:
+        t0 = time.time()
+        docs = rag.retrieve_documents(query)
+        elapsed = time.time() - t0
+        logger.info(f"[RAG] Retrieved {len(docs)} docs in {elapsed:.2f}s")
+        if not docs:
+            _cache_set(cache_key, {"context": ""})
+            return ""
+        parts = [f"[DOC {i}]\n{doc.page_content}" for i, doc in enumerate(docs, 1)]
+        context = "\n\n".join(parts)
+        _cache_set(cache_key, {"context": context})
+        return context
+    except Exception as e:
+        logger.warning(f"[RAG] Retrieval failed for '{query}': {e}")
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Persistent HTTP client
 # ---------------------------------------------------------------------------
 _http_client = None
 
@@ -66,19 +139,17 @@ async def _get_client():
 
 
 # ---------------------------------------------------------------------------
-# Model pre-warming — fire a tiny request on first use to load into RAM
+# Model pre-warming
 # ---------------------------------------------------------------------------
 _model_warmed = False
 
 async def _warmup_model():
-    """Send a trivial request so Ollama loads the model into RAM."""
     global _model_warmed
     if _model_warmed:
         return
     _model_warmed = True
-    logger.info("[SERVER] Pre-warming model (loading into RAM)...")
+    logger.info("[SERVER] Pre-warming model...")
     try:
-        import httpx
         client = await _get_client()
         warmup_payload = {
             "model": MODEL_NAME,
@@ -89,9 +160,9 @@ async def _warmup_model():
         }
         resp = await client.post(OLLAMA_URL, json=warmup_payload)
         resp.raise_for_status()
-        logger.info("[SERVER] Model pre-warm complete — loaded in RAM.")
+        logger.info("[SERVER] Model pre-warm complete.")
     except Exception as e:
-        logger.warning(f"[SERVER] Model pre-warm failed (will cold-start on first real request): {e}")
+        logger.warning(f"[SERVER] Model pre-warm failed: {e}")
 
 
 # ===========================================================================
@@ -215,15 +286,11 @@ def extract_signals(text: str, current_memory: dict, expected_field: str = None)
     if m:
         memory["name"] = m.group(1).strip()
     elif expected_field == "name":
-        # Aggressive capture if we explicitly expect a name: e.g. "haider abbas and for diet..."
-        # Just grab the first 2 or 3 words if they look like names.
         fallback_m = re.match(r"^\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)\b", text)
         if fallback_m:
             word = fallback_m.group(1).strip()
-            # Try to avoid grabbing noise words 
             if word.lower() not in _NOISE_SET and word.lower() not in _BOOK_KW and word.lower() not in _CANCEL_KW:
                 memory["name"] = word
-
     m = _DIET_RX.search(text)
     if m:
         memory["dietary_preferences"] = m.group(0)
@@ -271,17 +338,14 @@ _CONFIRM_KW = {"yes", "confirm", "that's correct", "go ahead", "sure", "correct"
 _DENY_KW    = {"no", "wrong", "incorrect", "not right", "cancel that", "don't confirm",
                "that's wrong", "change it"}
 
-# Greeting keywords — answer deterministically, no LLM needed
 _GREETING_KW = {"hello", "hi", "hey", "good morning", "good afternoon", "good evening",
                 "howdy", "greetings", "what's up", "sup"}
 
 
 def detect_intent(text: str) -> str:
     lowered = text.lower().strip()
-    
     def contains_kw(kw_set):
         return any(re.search(r'\b' + re.escape(kw) + r'\b', lowered) for kw in kw_set)
-
     if contains_kw(_CANCEL_KW):
         return "cancel_reservation"
     if contains_kw(_MODIFY_KW):
@@ -296,7 +360,6 @@ def detect_intent(text: str) -> str:
 
 
 def _is_greeting(text: str) -> bool:
-    """Check if the message is a simple greeting."""
     lowered = text.lower().strip().rstrip("!?.,:;")
     return lowered in _GREETING_KW
 
@@ -306,9 +369,32 @@ def _is_greeting(text: str) -> bool:
 # ===========================================================================
 
 _OFF_TOPIC_KW = {
-    "flight", "hotel", "uber", "taxi", "weather", "news",
+    "flight", "hotel", "uber", "taxi", "news",
     "stock", "bitcoin", "code", "program", "write me", "recipe",
     "movie", "song", "joke",
+}
+
+# Tool trigger regexes
+_WEATHER_TRIGGER_RX = re.compile(
+    r"\b(weather|rain|raining|sunny|sunshine|outdoor|outside|cold|hot|windy|temperature|forecast|umbrella)\b",
+    re.IGNORECASE,
+)
+_MENU_TRIGGER_RX = re.compile(
+    r"\b(menu|food|dish|dishes|pasta|pizza|eat|cuisine|special|specials|dessert|starter|appetizer|drink|drinks|price|cost|how much|what do you serve|what.*eat|vegetarian|vegan|gluten|wine|cocktail|steak|seafood|risotto)\b",
+    re.IGNORECASE,
+)
+_LOOKUP_TRIGGER_RX = re.compile(
+    r"\b(check|find|lookup|look\s*up|existing|do i have|have a reservation|have a booking|my reservation|my booking)\b",
+    re.IGNORECASE,
+)
+_MENU_CATEGORY_RX = {
+    "starters":     re.compile(r"\b(starter|starters|appetizer|antipasto|bruschetta|burrata|calamari)\b", re.IGNORECASE),
+    "pasta":        re.compile(r"\b(pasta|risotto|spaghetti|penne|tagliatelle|linguine|gnocchi)\b",       re.IGNORECASE),
+    "mains":        re.compile(r"\b(main|mains|entree|second|secondi|steak|chicken|fish|salmon|sea\s*bass)\b", re.IGNORECASE),
+    "seafood":      re.compile(r"\b(seafood|fish|prawn|shrimp|lobster|clam|mussel)\b",                   re.IGNORECASE),
+    "desserts":     re.compile(r"\b(dessert|sweet|tiramisu|cannoli|panna\s*cotta|gelato)\b",              re.IGNORECASE),
+    "drinks":       re.compile(r"\b(drink|drinks|wine|cocktail|water|coffee|espresso|prosecco)\b",        re.IGNORECASE),
+    "lunch_specials": re.compile(r"\b(lunch|lunch special)\b",                                           re.IGNORECASE),
 }
 
 
@@ -370,7 +456,9 @@ def _next_stage(session: dict, intent: str) -> str:
 # Message array construction
 # ===========================================================================
 
-def _build_messages(session: dict, user_message: str, session_id: str) -> list[dict]:
+def _build_messages(session: dict, user_message: str, session_id: str,
+                    retrieved_context: str = "",
+                    tool_used: str | None = None) -> list[dict]:
     stage        = session["stage"]
     memory       = session["memory"]
     modify_field = session.get("modify_field")
@@ -378,15 +466,19 @@ def _build_messages(session: dict, user_message: str, session_id: str) -> list[d
     window = _get_window(session["history"][:-1])
 
     system_text = build_system_prompt(memory, window, stage=stage,
+                                      retrieved_context=retrieved_context,
                                       modify_field=modify_field)
 
+    # Append CRM user info (kept brief to avoid bloating prompt)
     user_data = get_user(session_id)
-    user_info_text = json.dumps(user_data) if user_data else "No stored user info."
-    system_text += f"\n\nUser Info:\n{user_info_text}"
+    if user_data and user_data.get("name"):
+        system_text += f"\n\nReturning customer: {user_data.get('name')}."
+        if user_data.get("dietary_preferences"):
+            system_text += f" Dietary: {user_data['dietary_preferences']}."
 
     messages = [{"role": "system", "content": system_text}]
 
-    examples = get_few_shot_examples(stage, memory, modify_field=modify_field)
+    examples = get_few_shot_examples(stage, memory, modify_field=modify_field, tool_used=tool_used)
     messages.extend(examples)
     messages.extend(window)
     messages.append({"role": "user", "content": user_message})
@@ -395,7 +487,7 @@ def _build_messages(session: dict, user_message: str, session_id: str) -> list[d
 
 
 # ===========================================================================
-# Deterministic reply builders
+# Deterministic reply builders (no LLM needed for these)
 # ===========================================================================
 
 def _build_confirming_reply(memory: dict) -> str:
@@ -403,14 +495,12 @@ def _build_confirming_reply(memory: dict) -> str:
     time_   = memory.get("time")    or "?"
     guests  = memory.get("guests")  or "?"
     name    = memory.get("name")    or "?"
-
     extras = []
     if memory.get("dietary_preferences"):
         extras.append(memory["dietary_preferences"])
     if memory.get("special_requests"):
         extras.append(memory["special_requests"])
     extra_str = f", {', '.join(extras)}" if extras else ""
-
     return (
         f"So that's a table for {guests} on {date} at {time_} "
         f"under {name}{extra_str} — shall I confirm that?"
@@ -422,14 +512,12 @@ def _build_confirmed_reply(memory: dict) -> str:
     time_   = memory.get("time")    or "the requested time"
     guests  = memory.get("guests")  or "your group"
     name    = memory.get("name")    or "you"
-
     extras = []
     if memory.get("dietary_preferences"):
         extras.append(memory["dietary_preferences"])
     if memory.get("special_requests"):
         extras.append(memory["special_requests"])
     extra_str = f", {', '.join(extras)}" if extras else ""
-
     return (
         f"Your table for {guests} on {date} at {time_} "
         f"under {name} is confirmed{extra_str} — we look forward to seeing you!"
@@ -452,8 +540,7 @@ def _build_modify_done_reply(memory: dict, modify_field: str) -> str:
 def _process_turn(session: dict, user_message: str) -> None:
     session["history"].append({"role": "user", "content": user_message})
     prev_memory = dict(session["memory"])
-    
-    # Determine what field we might be expecting
+
     expected = None
     if session["stage"] == "collecting":
         missing = [
@@ -491,109 +578,179 @@ def _process_turn(session: dict, user_message: str) -> None:
 
 
 # ===========================================================================
-# Tool Orchestrator
+# Tool execution helper
 # ===========================================================================
 
-async def _run_tool_async(tool_fn, *args):
-    """Executes a tool asynchronously with a mandatory 2-second timeout guard."""
+async def _run_tool_async(tool_fn, *args, timeout: float = 5.0):
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(tool_fn, *args),
-            timeout=2.0
+            timeout=timeout
         )
     except asyncio.TimeoutError:
-        logger.error("[TOOL ERROR] Tool execution timed out.")
-        return {"status": "error", "message": "Tool execution timed out."}
+        logger.error("[TOOL ERROR] Timed out.")
+        return {"status": "error", "message": "Tool timed out."}
     except Exception as e:
-        logger.error(f"[TOOL ERROR] Engine failure: {e}")
-        return {"status": "error", "message": "Tool execution failed."}
+        logger.error(f"[TOOL ERROR] {e}")
+        return {"status": "error", "message": "Tool failed."}
 
 
-def _safe_parse(text: str) -> dict | None:
-    try:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start != -1 and end != 0:
-            return json.loads(text[start:end])
-    except Exception:
-        pass
-    return None
+# ===========================================================================
+# Tool Orchestrator — PURE REGEX (no second LLM call)
+# Results are formatted into a concise context string for the main LLM call
+# ===========================================================================
 
-
-async def tool_orchestrator(session_id: str, user_message: str, extracted_memory: dict) -> list[dict]:
+async def tool_orchestrator(session_id: str, user_message: str,
+                            extracted_memory: dict) -> tuple[str, str | None]:
     """
-    Acts as the Tool Orchestrator module.
-    Uses a fast LLM pass to decide if CRM (or other tools) should be invoked,
-    with Regex fallback for 1.8B reliability.
+    Detect and execute the appropriate tool using regex only.
+    Returns (context_string, tool_name) where context_string is injected into
+    the system prompt and tool_name is used to select the right few-shot examples.
+
+    No second LLM call → eliminates ~2-4s latency on CPU.
+    Results are cached to keep repeated queries fast.
     """
-    tool_prompt = [
-        {"role": "system", "content": f"""You are a Tool Orchestrator.
-Available Tools:
-1. update_user: Use if the user provides their name, dietary preferences, or special requests.
-   Args schema: {{"user_id": "{session_id}", "key": "<field>", "value": "<value>"}}
+    msg            = user_message
+    _default_city  = RESTAURANT_CITY or "London"
+    t0             = time.time()
 
-If a tool should be called, output ONLY a JSON object:
-{{"tool": "<tool_name>", "args": {{...}}}}
-If no tool is needed, output exactly: NONE.
-"""},
-        {"role": "user", "content": "My name is Haider."},
-        {"role": "assistant", "content": f'{{"tool": "update_user", "args": {{"user_id": "{session_id}", "key": "name", "value": "Haider"}}}}'},
-        {"role": "user", "content": "Book a table for 2 for tomorrow."},
-        {"role": "assistant", "content": "NONE"},
-        {"role": "user", "content": "I am allergic to peanuts."},
-        {"role": "assistant", "content": f'{{"tool": "update_user", "args": {{"user_id": "{session_id}", "key": "dietary_preferences", "value": "peanut allergy"}}}}'},
-        {"role": "user", "content": user_message}
-    ]
+    # ── CRM: name / dietary / special ───────────────────────────────────────
+    if extracted_memory.get("name"):
+        res = await _run_tool_async(update_user, session_id, "name", extracted_memory["name"], timeout=1.5)
+        logger.info(f"[TOOL] update_user(name) → {res}")
+        # CRM update doesn't need to return context to the LLM
+        return "", None
 
-    payload = {
-        "model": MODEL_NAME,
-        "messages": tool_prompt,
-        "stream": False,
-        "options": {"num_predict": 60, "temperature": 0.0}
-    }
+    if extracted_memory.get("dietary_preferences"):
+        res = await _run_tool_async(update_user, session_id, "dietary_preferences",
+                                    extracted_memory["dietary_preferences"], timeout=1.5)
+        logger.info(f"[TOOL] update_user(dietary) → {res}")
+        return "", None
 
-    import httpx
+    if extracted_memory.get("special_requests"):
+        res = await _run_tool_async(update_user, session_id, "special_requests",
+                                    extracted_memory["special_requests"], timeout=1.5)
+        logger.info(f"[TOOL] update_user(special) → {res}")
+        return "", None
 
-    tool_call = None
+    # ── Weather ──────────────────────────────────────────────────────────────
+    if _WEATHER_TRIGGER_RX.search(msg):
+        cache_key = f"weather:{_default_city}"
+        cached = _cache_get(cache_key, ttl=300)  # 5-min cache
+        if cached:
+            logger.info("[TOOL] get_weather — cache hit")
+            res = cached
+        else:
+            res = await _run_tool_async(get_weather, _default_city, timeout=6.0)
+            if res.get("status") == "ok":
+                _cache_set(cache_key, res)
+            logger.info(f"[TOOL] get_weather({_default_city}) in {time.time()-t0:.2f}s")
 
-    # 1. LLM Decision Phase
-    try:
-        client = await _get_client()
-        resp = await client.post(OLLAMA_URL, json=payload, timeout=20.0)
-        resp.raise_for_status()
-        text = resp.json().get("message", {}).get("content", "").strip()
+        if res.get("status") == "ok":
+            context = (
+                f"Current weather in {res['city']}: {res['temperature_c']}°C, "
+                f"{res['description']}, feels like {res['feels_like_c']}°C, "
+                f"humidity {res['humidity_pct']}%. "
+                f"{res['outdoor_note']}"
+            )
+        else:
+            context = res.get("message", "Weather data unavailable.")
+        return context, "get_weather"
 
-        if text != "NONE":
-            tool_call = _safe_parse(text)
-    except Exception as e:
-        logger.warning(f"[ORCHESTRATOR] LLM logic failed or skipped: {e}")
+    # ── Menu search ──────────────────────────────────────────────────────────
+    if _MENU_TRIGGER_RX.search(msg):
+        cat  = next((k for k, rx in _MENU_CATEGORY_RX.items() if rx.search(msg)), "")
+        diet_match = re.search(r"\b(vegetarian|vegan|gluten[- ]free)\b", msg, re.IGNORECASE)
+        diet = diet_match.group(0).lower().replace("-", "_") if diet_match else ""
 
-    # 2. Hybrid Regex Fallback
-    if not tool_call:
-        if extracted_memory.get("name"):
-            logger.info("[FALLBACK] Regex fallback used for name CRM update")
-            tool_call = {"tool": "update_user", "args": {"user_id": session_id, "key": "name", "value": extracted_memory["name"]}}
-        elif extracted_memory.get("dietary_preferences"):
-            logger.info("[FALLBACK] Regex fallback used for dietary_preferences CRM update")
-            tool_call = {"tool": "update_user", "args": {"user_id": session_id, "key": "dietary_preferences", "value": extracted_memory["dietary_preferences"]}}
-        elif extracted_memory.get("special_requests"):
-            logger.info("[FALLBACK] Regex fallback used for special_requests CRM update")
-            tool_call = {"tool": "update_user", "args": {"user_id": session_id, "key": "special_requests", "value": extracted_memory["special_requests"]}}
+        cache_key = f"menu:{cat}:{diet}"
+        cached = _cache_get(cache_key, ttl=3600)  # 1-hour cache (menu rarely changes)
+        if cached:
+            logger.info("[TOOL] search_menu — cache hit")
+            res = cached
+        else:
+            res = await _run_tool_async(search_menu, cat, diet, timeout=2.0)
+            if res.get("status") == "ok":
+                _cache_set(cache_key, res)
+            logger.info(f"[TOOL] search_menu({cat},{diet}) in {time.time()-t0:.2f}s")
 
-    # 3. Execution Phase
-    if tool_call and isinstance(tool_call, dict):
-        tool = tool_call.get("tool")
-        args = tool_call.get("args", {})
-        logger.info(f"[TOOL EXECUTED] {tool} -> {args}")
+        if res.get("status") == "ok":
+            context = _format_menu_context(res.get("results", {}), cat, diet)
+        else:
+            context = "Menu information is temporarily unavailable. Please ask your server."
+        return context, "search_menu"
 
-        if tool == "update_user" and "user_id" in args:
-            res = await _run_tool_async(update_user, args.get("user_id"), args.get("key"), args.get("value"))
-            return [
-                {"role": "assistant", "content": f"Invoking Tool: {tool}"},
-                {"role": "tool", "content": f"Tool Result:\n{json.dumps(res)}"}
-            ]
+    # ── Reservation lookup ───────────────────────────────────────────────────
+    if _LOOKUP_TRIGGER_RX.search(msg):
+        name_m = _NAME_RX.search(msg)
+        name   = name_m.group(1).strip() if name_m else extracted_memory.get("name", "")
+        if not name:
+            return "", None
 
-    return []
+        cache_key = f"lookup:{name.lower()}"
+        cached = _cache_get(cache_key, ttl=30)  # 30s cache
+        if cached:
+            logger.info("[TOOL] lookup_reservation — cache hit")
+            res = cached
+        else:
+            res = await _run_tool_async(lookup_reservation, name, timeout=2.0)
+            if res.get("status") == "ok":
+                _cache_set(cache_key, res)
+            logger.info(f"[TOOL] lookup_reservation({name}) in {time.time()-t0:.2f}s")
+
+        if res.get("status") == "ok" and res.get("found"):
+            r = res["reservations"][0]
+            context = (
+                f"Reservation found: {r['name']}, {r['date']}, {r['time']}, "
+                f"{r['guests']} guests. Status: {r['status']}."
+            )
+        elif res.get("status") == "ok":
+            context = f"No active reservation found under '{name}'."
+        else:
+            context = res.get("message", "Could not check reservations.")
+        return context, "lookup_reservation"
+
+    return "", None
+
+
+def _format_menu_context(results: dict, category: str, dietary: str) -> str:
+    """Convert menu search results into a compact string for the LLM context."""
+    if not results:
+        return "No items found matching your request."
+
+    lines = []
+    item_count = 0
+    MAX_ITEMS = 6  # Cap to avoid bloating the prompt for Qwen 1.8B
+
+    for cat, items in results.items():
+        for item in items:
+            if item_count >= MAX_ITEMS:
+                break
+            name  = item.get("name", "")
+            price = item.get("price")
+            desc  = item.get("description", "")[:60]  # truncate long descriptions
+            allergens = item.get("allergens", "")
+
+            line = f"• {name}"
+            if price:
+                line += f" (${price:.0f})"
+            if desc:
+                line += f" — {desc}"
+            if allergens and allergens.lower() not in ("none", ""):
+                line += f" [contains {allergens}]"
+            lines.append(line)
+            item_count += 1
+
+        if item_count >= MAX_ITEMS:
+            remaining = sum(len(v) for v in results.values()) - item_count
+            if remaining > 0:
+                lines.append(f"...and {remaining} more items available.")
+            break
+
+    section = category if category else "menu"
+    diet_str = f" ({dietary})" if dietary else ""
+    header = f"La Bella Tavola {section}{diet_str}:\n"
+    return header + "\n".join(lines)
 
 
 # ===========================================================================
@@ -603,6 +760,7 @@ If no tool is needed, output exactly: NONE.
 async def chat_stream(session_id: str, user_message: str):
     """
     Process a user message and stream the assistant reply token by token.
+    Tools and RAG run in parallel BEFORE the LLM call to minimise latency.
     """
     import httpx
 
@@ -612,44 +770,84 @@ async def chat_stream(session_id: str, user_message: str):
 
     # ── Deterministic shortcut: simple greetings ─────────────────────────────
     if _is_greeting(user_message):
-        logger.info(f"[SERVER] [{session_id}] Greeting detected — returning instant reply (no LLM)")
         user_data = get_user(session_id)
-        if user_data.get("name"):
-            greeting = f"Welcome back {user_data['name']}! — would you like to make a reservation, or do you have a question about the restaurant?"
+        if user_data and user_data.get("name"):
+            greeting = f"Welcome back, {user_data['name']}! Would you like to make a reservation or do you have a question?"
         else:
             greeting = GREETING_REPLY
-
         session["history"].append({"role": "user",      "content": user_message})
         session["history"].append({"role": "assistant", "content": greeting})
         yield greeting
         return
 
-    # Hard guardrail — no LLM call for off-topic messages
+    # ── Off-topic guardrail ───────────────────────────────────────────────────
     if is_off_topic(user_message):
-        logger.info(f"[SERVER] [{session_id}] Off-topic detected — returning canned reply")
         session["history"].append({"role": "user",      "content": user_message})
         session["history"].append({"role": "assistant", "content": OFF_TOPIC_REPLY})
         yield OFF_TOPIC_REPLY
         return
 
-    # Update session state
+    # ── Update session state ──────────────────────────────────────────────────
     _process_turn(session, user_message)
     stage  = session["stage"]
     memory = session["memory"]
-    logger.info(f"[SERVER] [{session_id}] Stage: {stage} | Intent: {session['intent']} | Memory: {memory}")
+    logger.info(f"[SESSION] [{session_id}] stage={stage} intent={session['intent']} memory={memory}")
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # TOOL ORCHESTRATION LAYER (PRE-GENERATION LLM DECISION)
-    # ══════════════════════════════════════════════════════════════════════════
-    tool_messages = await tool_orchestrator(session_id, user_message, session["memory"])
+    # ── Deterministic confirmations (no LLM needed) ───────────────────────────
+    if stage == "confirming":
+        reply = _build_confirming_reply(memory)
+        session["history"].append({"role": "assistant", "content": reply})
+        yield reply
+        return
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # LLM CALL — generates answers directly based on the system prompt context
-    # ══════════════════════════════════════════════════════════════════════════
-    messages = _build_messages(session, user_message, session_id)
+    if stage == "confirmed":
+        reply = _build_confirmed_reply(memory)
+        session["history"].append({"role": "assistant", "content": reply})
+        # Auto-save to DB
+        _name = memory.get("name", "")
+        _date = memory.get("date", "")
+        _time = memory.get("time", "")
+        if _name and _date and _time:
+            asyncio.create_task(
+                _run_tool_async(
+                    save_reservation,
+                    _name, _date, _time,
+                    memory.get("guests", ""),
+                    memory.get("dietary_preferences", ""),
+                    memory.get("special_requests", ""),
+                    session_id,
+                    timeout=3.0
+                )
+            )
+        yield reply
+        return
 
-    if tool_messages:
-        messages = messages[:-1] + tool_messages + [messages[-1]]
+    # ── Tool + RAG in parallel ────────────────────────────────────────────────
+    pre_start = time.time()
+
+    tool_task = tool_orchestrator(session_id, user_message, session["memory"])
+
+    rag_stages = ("general", "answering")
+    if stage in rag_stages:
+        rag_task = asyncio.to_thread(_fetch_rag_context, user_message)
+    else:
+        rag_task = asyncio.coroutine(lambda: "")()
+
+    # Run both concurrently
+    (tool_context, tool_used), retrieved_context = await asyncio.gather(
+        tool_task, rag_task
+    )
+
+    pre_elapsed = time.time() - pre_start
+    logger.info(f"[PRE-GEN] tool={tool_used} rag={'yes' if retrieved_context else 'no'} in {pre_elapsed:.2f}s")
+
+    # Merge: tool context takes priority over RAG for general queries
+    final_context = tool_context or retrieved_context
+
+    # ── Build LLM messages ────────────────────────────────────────────────────
+    messages = _build_messages(session, user_message, session_id,
+                               retrieved_context=final_context,
+                               tool_used=tool_used)
 
     payload = {
         "model":      MODEL_NAME,
@@ -663,16 +861,16 @@ async def chat_stream(session_id: str, user_message: str):
             "stop": [
                 "\nCustomer:", "\nUser:", "\n\nCustomer:", "\n\nUser:",
                 "Thank you for", "I hope this", "Best regards",
-                "Note:", "\n-"
+                "Note:", "\n-", "Human:", "Assistant:"
             ],
         },
     }
 
     full_response = ""
-    start_time = time.time()
-    first_token_time = None
+    start_time    = time.time()
+    first_token   = None
 
-    logger.info(f"[SERVER] [{session_id}] Calling AI model... ({len(messages)} turns)")
+    logger.info(f"[LLM] [{session_id}] Calling model ({len(messages)} msgs)...")
 
     try:
         client = await _get_client()
@@ -687,39 +885,36 @@ async def chat_stream(session_id: str, user_message: str):
                     continue
 
                 if "error" in data:
-                    logger.error(f"[ERROR] [{session_id}] Ollama error: {data['error']}")
+                    logger.error(f"[LLM ERROR] {data['error']}")
                     yield "Sorry, there was an engine error."
                     break
 
                 chunk = data.get("message", {}).get("content", "")
                 if chunk:
-                    if not first_token_time:
-                        first_token_time = time.time()
-                        ttft = first_token_time - start_time
-                        logger.info(f"[SERVER] [{session_id}] First token: {ttft:.2f}s")
-
+                    if not first_token:
+                        first_token = time.time()
+                        logger.info(f"[LLM] TTFT: {first_token - start_time:.2f}s")
                     full_response += chunk
                     yield chunk
+
                 if data.get("done"):
                     break
 
         total = time.time() - start_time
-        logger.info(f"[SERVER] [{session_id}] AI done in {total:.2f}s")
-        logger.info(f"[PERFORMANCE] [{session_id}] {total:.2f}s | ~{len(full_response.split())} words")
+        logger.info(f"[LLM] Done in {total:.2f}s | ~{len(full_response.split())} words")
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"[ERROR] [{session_id}] HTTP {e.response.status_code}")
+        logger.error(f"[ERROR] HTTP {e.response.status_code}")
         full_response = "Sorry, I'm having trouble right now. Please try again."
         yield full_response
     except Exception as e:
-        logger.error(f"[ERROR] [{session_id}] {e}")
+        logger.error(f"[ERROR] {e}")
         full_response = "Sorry, I'm having trouble right now. Please try again."
         yield full_response
 
-    # ── Fallback if LLM returned empty ───────────────────────────────────────
+    # ── Fallback ──────────────────────────────────────────────────────────────
     if not full_response.strip():
-        logger.warning(f"[WARNING] [{session_id}] LLM returned empty response — using fallback")
-        full_response = "I can help with reservations and questions about La Bella Tavola — how may I help you?"
+        full_response = "I can help with reservations and questions about La Bella Tavola — how may I assist you?"
         yield full_response
 
     session["history"].append({"role": "assistant", "content": full_response})
