@@ -32,8 +32,7 @@ The assistant is designed to simulate a practical front-desk workflow with:
 - **Runtime**: Ollama local inference
 - **Why this choice**:
   - lightweight enough for CPU-only environments,
-  - strong instruction following for structured response style,
-  - no cloud/API dependency and predictable local behavior.
+  - strong instruction following for structured response style
 
 ### Performance Characteristics (Observed)
 - Approximate generation rate: **2-4 tokens/sec** on CPU.
@@ -41,16 +40,18 @@ The assistant is designed to simulate a practical front-desk workflow with:
 - First-response latency improved through startup warmup.
 
 ## Document Collection (RAG Requirement)
-For Assignment 4, the target design is to include a 50-100 document collection, chunking, embeddings, and top-k retrieval.
-
-In this repository snapshot, retrieval and vector indexing modules are not yet wired into the live backend path. If your final branch contains those modules, document the following here:
-- document source and total count,
-- chunk size and overlap,
-- embedding model,
-- vector DB choice (e.g., FAISS/Chroma),
-- retrieval settings (`top-k`, similarity metric),
-- indexing script/command.
-
+50 documents related to restaurant collected and stored in vector DB(Chroma)
+Indexer script for Restaurant Documents:
+    - Loads all .txt files from a specified folder with error handling.
+    - Splits documents into chunks with overlap and logs chunk statistics.
+    - Initializes a HuggingFace embedding model with error handling.
+    - Creates and persists a Chroma vector database, cleaning old data if exists.
+    - Logs detailed information at each step for monitoring and debugging.
+Retriever script for the Restaurant RAG system. Handles:
+    - Loading the Chroma vector database
+    - Initializing the Ollama LLM client
+    - Providing a method to retrieve relevant documents for a query
+    
 ## Tools Description (CRM + 3 Tools)
 Assignment 4 requires one CRM tool plus three additional tools callable during conversation.
 
@@ -58,9 +59,9 @@ Current working path in this snapshot focuses on conversational FSM + streaming.
 1. **CRM Tool**  
    - Purpose: store/retrieve/update user profile and history by session/user ID  
    - Input schema and sample call  
-2. **Tool 1** - name, schema, sample call  
-3. **Tool 2** - name, schema, sample call  
-4. **Tool 3** - name, schema, sample call  
+2. **Menu** - Lists all items on the menu  
+3. **Weather** - Uses api to lookup weather in the restaurant's location (Italy), this helps in determining if outdoor sitting is suitable.  
+4. **Reservation_Lookup** - Retrieves reservation details using sqlite.  
 
 Also include:
 - async execution model,
@@ -130,30 +131,10 @@ docker compose down
 - Frontend deps: `package.json`
 
 ## Known Limitations
-- RAG modules and tool orchestration are not active in this snapshot path.
+- RAG modules and tool orchestration slow down response time although optimization techniques applied.
 - Session memory is in-memory only (resets on server restart).
 - CPU inference latency increases for longer responses.
 - Regex extraction may miss highly unusual phrasing patterns.
 
-## Cloud Deployment (Optional / Extra Credit)
-Cloud deployment is not included in this local snapshot.
 
-For final submission, if deployed, include:
-- public URL,
-- free-tier platform used,
-- deployment adjustments made,
-- observed latency and stability.
 
-## Demo Video
-Add your unlisted demo link:
-- `Video: <insert link>`
-
-## Submission Checklist
-- [x] Source code (frontend + backend)
-- [x] Docker setup
-- [x] Dependency manifests
-- [x] Postman collection
-- [x] README with architecture and setup
-- [ ] Final RAG corpus + indexing details
-- [ ] CRM + 3 callable tool details
-- [ ] Optional cloud deployment URL
