@@ -1,0 +1,1010 @@
+{
+  "meta": {
+    "generated_at_utc": "2026-05-04T15:03:29+00:00",
+    "api_base": "http://localhost:8000",
+    "model": "qwen2.5:3b-instruct",
+    "hardware": {
+      "platform": "Windows-11-10.0.26200-SP0",
+      "python": "3.12.3",
+      "cpu": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+      "cpu_count_logical": 12,
+      "machine": "AMD64",
+      "disk_free_gb_estimate": null
+    },
+    "dependencies": {
+      "fastapi": "0.136.1",
+      "uvicorn": "0.46.0",
+      "websockets": "16.0",
+      "httpx": "0.28.1",
+      "langchain": "1.2.17",
+      "chromadb": "1.5.8",
+      "sentence-transformers": "5.4.1",
+      "ollama": "unknown"
+    },
+    "plots": {
+      "enabled": true,
+      "files": [
+        "concurrency_vs_latency_20260504_200331.png",
+        "scenario_vs_latency_20260504_200331.png"
+      ]
+    }
+  },
+  "conversation_correctness": {
+    "num_dialogues": 10,
+    "task_completion_rate": 0.7,
+    "policy_adherence_rate": 1.0,
+    "coherence_rate": 1.0,
+    "details": [
+      {
+        "id": "conv_01_booking_success",
+        "task_ok": true,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "Your table for 4 on tomorrow at 7 pm under Alice is confirmed, vegan \u2014 we look forward to seeing you!",
+        "transcript": [
+          {
+            "user": "hi",
+            "assistant": "Hello! Welcome to La Bella Tavola \ud83c\udf5d \u2014 would you like to make a reservation, or do you have a question about the restaurant?"
+          },
+          {
+            "user": "i want to book a table",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "tomorrow",
+            "assistant": "Great, and what exact time should I reserve?"
+          },
+          {
+            "user": "7 pm",
+            "assistant": "How many guests should I book for?"
+          },
+          {
+            "user": "4 people",
+            "assistant": "What name should I put the reservation under, and any dietary preferences or special requests?"
+          },
+          {
+            "user": "my name is Alice",
+            "assistant": "So that's a table for 4 on tomorrow at 7 pm under Alice \u2014 shall I confirm that?"
+          },
+          {
+            "user": "yes",
+            "assistant": "Your table for 4 on tomorrow at 7 pm under Alice is confirmed, vegan \u2014 we look forward to seeing you!"
+          }
+        ]
+      },
+      {
+        "id": "conv_02_policy_refusal",
+        "task_ok": false,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "I can only help with reservations and questions about La Bella Tavola \u2014 is there something I can help you with here?",
+        "transcript": [
+          {
+            "user": "book me a flight to dubai",
+            "assistant": "I can only help with reservations and questions about La Bella Tavola \u2014 is there something I can help you with here?"
+          }
+        ]
+      },
+      {
+        "id": "conv_03_modify_flow",
+        "task_ok": true,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "Done \u2014 sara's reservation has been updated: time changed to 9 pm.",
+        "transcript": [
+          {
+            "user": "i want to book a table",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "friday",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "8 pm",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "2 people",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "my name is sara",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "yes",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "i want to change my reservation",
+            "assistant": "What would you like to change \u2014 date, time, or guest count?"
+          },
+          {
+            "user": "change time to 9 pm",
+            "assistant": "Done \u2014 sara's reservation has been updated: time changed to 9 pm."
+          }
+        ]
+      },
+      {
+        "id": "conv_04_cancel_flow",
+        "task_ok": true,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "Done \u2014 Omar's reservation has been cancelled.",
+        "transcript": [
+          {
+            "user": "i want to book a table",
+            "assistant": "Sure, what date would you like to book for?"
+          },
+          {
+            "user": "tomorrow",
+            "assistant": "Great, and what exact time should I reserve?"
+          },
+          {
+            "user": "8 pm",
+            "assistant": "How many guests should I book for?"
+          },
+          {
+            "user": "3 people",
+            "assistant": "What name should I put the reservation under, and any dietary preferences or special requests?"
+          },
+          {
+            "user": "my name is Omar",
+            "assistant": "So that's a table for 3 on tomorrow at 8 pm under Omar \u2014 shall I confirm that?"
+          },
+          {
+            "user": "yes",
+            "assistant": "Your table for 3 on tomorrow at 8 pm under Omar is confirmed \u2014 we look forward to seeing you!"
+          },
+          {
+            "user": "cancel my reservation",
+            "assistant": "Done \u2014 Omar's reservation has been cancelled."
+          }
+        ]
+      },
+      {
+        "id": "conv_05_menu_question",
+        "task_ok": true,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "We offer a variety of pastas like Tagliatelle al Rag\u00f9 Bolognese, Spaghetti ai Frutti di Mare, Fettuccine Alfredo, Pappardelle al Cinghiale, Linguine alle Vongole, and Rigatoni alla Matriciana.",
+        "transcript": [
+          {
+            "user": "what pasta do you have",
+            "assistant": "We offer a variety of pastas like Tagliatelle al Rag\u00f9 Bolognese, Spaghetti ai Frutti di Mare, Fettuccine Alfredo, Pappardelle al Cinghiale, Linguine alle Vongole, and Rigatoni alla Matriciana."
+          }
+        ]
+      },
+      {
+        "id": "conv_06_weather_question",
+        "task_ok": true,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "Today's weather in Italy: 19.4\u00b0C, broken clouds, feels like 19.3\u00b0C, humidity 73%. Outdoor seating looks great!",
+        "transcript": [
+          {
+            "user": "how is the weather today",
+            "assistant": "Today's weather in Italy: 19.4\u00b0C, broken clouds, feels like 19.3\u00b0C, humidity 73%. Outdoor seating looks great!"
+          }
+        ]
+      },
+      {
+        "id": "conv_07_memory_name",
+        "task_ok": true,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "Your name is Ayesha. How can I help with your dining plans today at La Bella Tavola? Would you like to make a table reservation?",
+        "transcript": [
+          {
+            "user": "my name is Ayesha",
+            "assistant": "Hello Ayesha, how may I assist you with your dining plans at La Bella Tavola? Would you like to make a table reservation?"
+          },
+          {
+            "user": "what is my name?",
+            "assistant": "Your name is Ayesha. How can I help with your dining plans today at La Bella Tavola? Would you like to make a table reservation?"
+          }
+        ]
+      },
+      {
+        "id": "conv_08_dietary_memory",
+        "task_ok": true,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "You can enjoy dishes like Bruschetta al Pomodoro or Arancini Siciliani, both of which are vegetarian-friendly options at La Bella Tavola. Would you like to make a table reservation now?",
+        "transcript": [
+          {
+            "user": "my name is Ayesha",
+            "assistant": "Hello Ayesha, how may I assist you with your dining plans at La Bella Tavola? Would you like to make a table reservation?"
+          },
+          {
+            "user": "i am vegetarian",
+            "assistant": "Great! We have several vegetarian options for you, such as Bruschetta al Pomodoro and Arancini Siciliani. How can I help with your dining plans?"
+          },
+          {
+            "user": "what can i eat?",
+            "assistant": "You can enjoy dishes like Bruschetta al Pomodoro or Arancini Siciliani, both of which are vegetarian-friendly options at La Bella Tavola. Would you like to make a table reservation now?"
+          }
+        ]
+      },
+      {
+        "id": "conv_09_lookup",
+        "task_ok": false,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "Sure, what date would you like to book for?",
+        "transcript": [
+          {
+            "user": "check my reservation under ayesha",
+            "assistant": "Sure, what date would you like to book for?"
+          }
+        ]
+      },
+      {
+        "id": "conv_10_out_of_scope_code",
+        "task_ok": false,
+        "policy_ok": true,
+        "coherence_ok": true,
+        "last_response": "I can only help with reservations and questions about La Bella Tavola \u2014 is there something I can help you with here?",
+        "transcript": [
+          {
+            "user": "write python code for me",
+            "assistant": "I can only help with reservations and questions about La Bella Tavola \u2014 is there something I can help you with here?"
+          }
+        ]
+      }
+    ]
+  },
+  "component_correctness": {
+    "crm_crud": {
+      "score": 1.0,
+      "checks": {
+        "create_ok": true,
+        "update_ok": true,
+        "add_ok": true,
+        "modify_ok": true,
+        "delete_ok": true
+      }
+    },
+    "tool_functional": {
+      "score": 1.0,
+      "checks": {
+        "menu_valid": true,
+        "menu_invalid_graceful": true,
+        "weather_schema": true,
+        "weather_invalid_city": true,
+        "reservation_save_lookup": true,
+        "reservation_update": true,
+        "reservation_cancel": true
+      }
+    },
+    "failure_modes": {
+      "score": 1.0,
+      "checks": {
+        "empty_vector_db_handled": true,
+        "tool_api_failure_handled": true,
+        "malformed_tool_call_handled": true
+      }
+    },
+    "tool_invocation": {
+      "accuracy": 0.8333333333333334,
+      "false_positive_rate": 0.0,
+      "details": [
+        {
+          "utterance": "what pasta do you have",
+          "expected_tool": "search_menu",
+          "predicted_tool": "search_menu",
+          "ok": true
+        },
+        {
+          "utterance": "show me vegetarian menu",
+          "expected_tool": "search_menu",
+          "predicted_tool": "search_menu",
+          "ok": true
+        },
+        {
+          "utterance": "how is the weather today",
+          "expected_tool": "get_weather",
+          "predicted_tool": "get_weather",
+          "ok": true
+        },
+        {
+          "utterance": "is it raining outside",
+          "expected_tool": "get_weather",
+          "predicted_tool": "get_weather",
+          "ok": true
+        },
+        {
+          "utterance": "check my reservation under ayesha",
+          "expected_tool": "lookup_reservation",
+          "predicted_tool": "lookup_reservation",
+          "ok": true
+        },
+        {
+          "utterance": "do i have a booking",
+          "expected_tool": "lookup_reservation",
+          "predicted_tool": null,
+          "ok": false
+        },
+        {
+          "utterance": "my name is alice",
+          "expected_tool": null,
+          "predicted_tool": null,
+          "ok": true
+        },
+        {
+          "utterance": "i am vegan",
+          "expected_tool": "search_menu",
+          "predicted_tool": "search_menu",
+          "ok": true
+        },
+        {
+          "utterance": "hello there",
+          "expected_tool": null,
+          "predicted_tool": null,
+          "ok": true
+        },
+        {
+          "utterance": "book me a flight",
+          "expected_tool": null,
+          "predicted_tool": null,
+          "ok": true
+        },
+        {
+          "utterance": "what desserts are available",
+          "expected_tool": "search_menu",
+          "predicted_tool": null,
+          "ok": false
+        },
+        {
+          "utterance": "temperature in italy",
+          "expected_tool": "get_weather",
+          "predicted_tool": "get_weather",
+          "ok": true
+        }
+      ]
+    },
+    "rag_retrieval": {
+      "num_queries": 20,
+      "precision_at_k": 0.41666666666666663,
+      "recall_at_k": 0.675,
+      "mrr": 0.4583333333333333,
+      "context_relevance": 0.41666666666666663,
+      "details": [
+        {
+          "query": "What are your opening hours?",
+          "retrieved": [
+            "21_catering_services.txt",
+            "41_table_reservation_tips.txt",
+            "41_table_reservation_tips.txt"
+          ],
+          "relevant": [
+            "12",
+            "hours"
+          ],
+          "hits": []
+        },
+        {
+          "query": "Where is the restaurant located?",
+          "retrieved": [
+            "21_catering_services.txt",
+            "26_restaurant_history.txt",
+            "26_restaurant_history.txt"
+          ],
+          "relevant": [
+            "address",
+            "location"
+          ],
+          "hits": []
+        },
+        {
+          "query": "Do you have valet parking?",
+          "retrieved": [
+            "12_parking_transportation.txt",
+            "12_parking_transportation.txt",
+            "12_parking_transportation.txt"
+          ],
+          "relevant": [
+            "parking",
+            "valet"
+          ],
+          "hits": [
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "query": "What is your dress code?",
+          "retrieved": [
+            "30_staff_training.txt",
+            "10_dress_code.txt",
+            "10_dress_code.txt"
+          ],
+          "relevant": [
+            "dress"
+          ],
+          "hits": [
+            2,
+            3
+          ]
+        },
+        {
+          "query": "Do you support wheelchair access?",
+          "retrieved": [
+            "42_outside_items_policy.txt",
+            "08_reservation_policy.txt",
+            "10_dress_code.txt"
+          ],
+          "relevant": [
+            "wheelchair",
+            "access"
+          ],
+          "hits": []
+        },
+        {
+          "query": "What is your cancellation policy?",
+          "retrieved": [
+            "08_reservation_policy.txt",
+            "15_group_booking_policy.txt",
+            "21_catering_services.txt"
+          ],
+          "relevant": [
+            "cancel",
+            "policy"
+          ],
+          "hits": [
+            1,
+            2
+          ]
+        },
+        {
+          "query": "Do you have vegetarian options?",
+          "retrieved": [
+            "14_dietary_allergen_info.txt",
+            "14_dietary_allergen_info.txt",
+            "05_desserts_menu.txt"
+          ],
+          "relevant": [
+            "menu",
+            "vegetarian"
+          ],
+          "hits": [
+            3
+          ]
+        },
+        {
+          "query": "What pasta dishes are available?",
+          "retrieved": [
+            "38_pasta_varieties.txt",
+            "04_main_courses.txt",
+            "38_pasta_varieties.txt"
+          ],
+          "relevant": [
+            "pasta",
+            "02"
+          ],
+          "hits": [
+            1,
+            3
+          ]
+        },
+        {
+          "query": "Which seafood dishes do you serve?",
+          "retrieved": [
+            "03_seafood_specialties.txt",
+            "34_italian_terminology.txt",
+            "04_main_courses.txt"
+          ],
+          "relevant": [
+            "seafood",
+            "03"
+          ],
+          "hits": [
+            1
+          ]
+        },
+        {
+          "query": "What desserts are offered?",
+          "retrieved": [
+            "24_lunch_specials.txt",
+            "48_chefs_tasting_menu.txt",
+            "28_seasonal_menus.txt"
+          ],
+          "relevant": [
+            "dessert",
+            "05"
+          ],
+          "hits": []
+        },
+        {
+          "query": "Do you have non alcoholic beverages?",
+          "retrieved": [
+            "17_children_families_policy.txt",
+            "27_general_faq.txt",
+            "24_lunch_specials.txt"
+          ],
+          "relevant": [
+            "beverage",
+            "40"
+          ],
+          "hits": []
+        },
+        {
+          "query": "What are the lunch specials?",
+          "retrieved": [
+            "13_payment_methods.txt",
+            "24_lunch_specials.txt",
+            "24_lunch_specials.txt"
+          ],
+          "relevant": [
+            "lunch",
+            "24"
+          ],
+          "hits": [
+            2,
+            3
+          ]
+        },
+        {
+          "query": "Do you have seasonal dishes?",
+          "retrieved": [
+            "25_about_chef.txt",
+            "28_seasonal_menus.txt",
+            "28_seasonal_menus.txt"
+          ],
+          "relevant": [
+            "seasonal",
+            "28"
+          ],
+          "hits": [
+            2,
+            3
+          ]
+        },
+        {
+          "query": "Can I book for large groups?",
+          "retrieved": [
+            "15_group_booking_policy.txt",
+            "15_group_booking_policy.txt",
+            "15_group_booking_policy.txt"
+          ],
+          "relevant": [
+            "group",
+            "reservation"
+          ],
+          "hits": [
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "query": "Is outdoor seating available?",
+          "retrieved": [
+            "18_pets_policy.txt",
+            "17_children_families_policy.txt",
+            "27_general_faq.txt"
+          ],
+          "relevant": [
+            "outdoor",
+            "seating"
+          ],
+          "hits": []
+        },
+        {
+          "query": "Do you offer gluten free dishes?",
+          "retrieved": [
+            "14_dietary_allergen_info.txt",
+            "27_general_faq.txt",
+            "31_menu_customization.txt"
+          ],
+          "relevant": [
+            "gluten",
+            "menu"
+          ],
+          "hits": [
+            3
+          ]
+        },
+        {
+          "query": "Do you serve wine?",
+          "retrieved": [
+            "27_general_faq.txt",
+            "23_wine_club.txt",
+            "39_mediterranean_culture.txt"
+          ],
+          "relevant": [
+            "wine",
+            "06"
+          ],
+          "hits": [
+            2
+          ]
+        },
+        {
+          "query": "What cocktails do you have?",
+          "retrieved": [
+            "07_cocktails_beverages.txt",
+            "07_cocktails_beverages.txt",
+            "07_cocktails_beverages.txt"
+          ],
+          "relevant": [
+            "cocktail",
+            "07"
+          ],
+          "hits": [
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "query": "Can I bring children?",
+          "retrieved": [
+            "27_general_faq.txt",
+            "17_children_families_policy.txt",
+            "17_children_families_policy.txt"
+          ],
+          "relevant": [
+            "children",
+            "policy"
+          ],
+          "hits": [
+            2,
+            3
+          ]
+        },
+        {
+          "query": "How can I contact the restaurant?",
+          "retrieved": [
+            "22_takeout_delivery.txt",
+            "20_gift_certificates.txt",
+            "22_takeout_delivery.txt"
+          ],
+          "relevant": [
+            "phone",
+            "contact"
+          ],
+          "hits": []
+        }
+      ]
+    },
+    "rag_faithfulness": {
+      "num_pairs": 30,
+      "avg_faithfulness": 0.6897238633686003,
+      "details": [
+        {
+          "question": "What are your opening hours?",
+          "score": 0.45454545454545453,
+          "answer_preview": "La Bella Tavola operates from 11:30 AM to 10:00 PM, with extended hours available upon request."
+        },
+        {
+          "question": "Where are you located?",
+          "score": 0.3333333333333333,
+          "answer_preview": "La Bella Tavola is conveniently located in the heart of downtown."
+        },
+        {
+          "question": "Do you have parking?",
+          "score": 0.7857142857142857,
+          "answer_preview": "Yes, there's accessible parking available with a call ahead to +1-800-555-1234. Staff is ready to assist and ensure space availability."
+        },
+        {
+          "question": "What is your dress code?",
+          "score": 0.7692307692307693,
+          "answer_preview": "La Bella Tavola's dress code is smart casual, encouraging neat attire suitable for an upscale dining setting."
+        },
+        {
+          "question": "What phone number can I call?",
+          "score": 0.4444444444444444,
+          "answer_preview": "You can call +1-800-555-1234 for various services including making a table reservation."
+        },
+        {
+          "question": "Do you have vegetarian starters?",
+          "score": 0.6,
+          "answer_preview": "Yes, we offer a variety of vegetarian starters including eggplant parmesan and mushroom preparations."
+        },
+        {
+          "question": "What pasta options do you have?",
+          "score": 0.7894736842105263,
+          "answer_preview": "We offer a variety of traditional pastas and occasional specialty items, including Spinach Pasta Verde, Whole Wheat, Black Squid Ink, and various handmade varieties."
+        },
+        {
+          "question": "Do you serve seafood?",
+          "score": 1.0,
+          "answer_preview": "Yes, we specialize in fresh grilled seafood dishes from trusted suppliers."
+        },
+        {
+          "question": "Tell me about desserts.",
+          "score": 0.6458333333333334,
+          "answer_preview": "La Bella Tavola offers a delightful dessert course, often featuring two components that are balanced and refined. Desserts include traditional Italian flavors like chocolate and fruit, served as the f"
+        },
+        {
+          "question": "Do you have lunch specials?",
+          "score": 1.0,
+          "answer_preview": "Yes, we offer reduced pricing and special wine by glass selections during Monday to Thursday lunch hours."
+        },
+        {
+          "question": "Any seasonal dishes right now?",
+          "score": 0.8,
+          "answer_preview": "Winter Comfort Foods are featured right now, including Hearty pastas, dried mushrooms, root vegetables, preserved items, and Winter Specials like Osso Buco."
+        },
+        {
+          "question": "Do you have non alcoholic drinks?",
+          "score": 0.7272727272727273,
+          "answer_preview": "Yes, we offer a variety of non-alcoholic drinks including milk, juice, hot chocolate, and water."
+        },
+        {
+          "question": "Can I bring children?",
+          "score": 0.7,
+          "answer_preview": "Yes, children are welcome. We have high chairs and a changing table available. Let me know if you'd like to make a reservation so we can accommodate your family-friendly visit."
+        },
+        {
+          "question": "Is wheelchair access available?",
+          "score": 0.9,
+          "answer_preview": "Wheelchair accessible entrance and restrooms are provided, ensuring full accessibility throughout the restaurant."
+        },
+        {
+          "question": "Do you have gluten free options?",
+          "score": 0.75,
+          "answer_preview": "Yes, we offer gluten-free pasta at an additional $3. Some other dishes may not be possible to modify gluten-free without significant changes. Confirmation needed for each request."
+        },
+        {
+          "question": "What wines do you serve?",
+          "score": 0.8,
+          "answer_preview": "We offer a variety of wines, from crisp Fruity wines for New to Wine profiles to full-bodied Barolo and Barbaresco for Meat Rag\u00f9. Summer and Autumn specials feature lighter whites and ros\u00e9s, while Win"
+        },
+        {
+          "question": "Do you have cocktails?",
+          "score": 0.75,
+          "answer_preview": "Yes, we offer classic Italian cocktails like the Negroni and Americano, as well as creative house specials."
+        },
+        {
+          "question": "What time do you close?",
+          "score": 0.64,
+          "answer_preview": "La Bella Tavola closes at state closing time, with alcohol service ending earlier. Private events may have extended hours based on space availability. Please check the website or call for exact detail"
+        },
+        {
+          "question": "Can I make a reservation for 8 people?",
+          "score": 0.75,
+          "answer_preview": "Yes, you can make a reservation for 8 people. Please let me know your preferred date and time."
+        },
+        {
+          "question": "What is your cancellation policy?",
+          "score": 0.9333333333333333,
+          "answer_preview": "Our cancellation policy allows free cancellations 24 hours in advance with a $25 per person fee for late cancellations less than 24 hours. No-shows incur a full party fee of $50 per person. Exceptions"
+        },
+        {
+          "question": "Do you offer outdoor seating?",
+          "score": 0.6842105263157895,
+          "answer_preview": "Yes, we have a dog-friendly patio area that's suitable for families when it's available during the season. We recommend making a reservation in advance as it can be busy."
+        },
+        {
+          "question": "What seafood mains do you recommend?",
+          "score": 0.3,
+          "answer_preview": "We recommend our fresh grilled sea bass or pan-seared scallops for a delicious seafood main."
+        },
+        {
+          "question": "What desserts are dairy free?",
+          "score": 0.9444444444444444,
+          "answer_preview": "Dairy-free options include grilled seafood with oil-based sauces, marinated olives, bruschetta al pomodoro, some pasta dishes with non-dairy sauce, and sorbet desserts."
+        },
+        {
+          "question": "Do you have vegan pasta?",
+          "score": 0.6153846153846154,
+          "answer_preview": "Yes, our plant-based pasta comes with marinara or oil-based sauces as a vegan option. Would you like to make a reservation?"
+        },
+        {
+          "question": "What are your appetizer options?",
+          "score": 0.5,
+          "answer_preview": "Our appetizers include Carpaccio di Manzo, Calamari a L'Amatriciana, Bruschetta with Prosciutto and Tomato, and Caprese Salad. Each showcases the finest Italian-Mediterranean flavors."
+        },
+        {
+          "question": "Are there business lunch options?",
+          "score": 0.875,
+          "answer_preview": "Conference calling and quiet corner tables are available for business lunches."
+        },
+        {
+          "question": "Do you have valet on weekends?",
+          "score": 0.7272727272727273,
+          "answer_preview": "Yes, valet service is available Friday, Saturday, and Sunday evenings for those with restaurant reservations."
+        },
+        {
+          "question": "What beverages do you have for kids?",
+          "score": 0.75,
+          "answer_preview": "We offer non-alcoholic options like milk, juice, hot chocolate, and water with various portion sizes."
+        },
+        {
+          "question": "Can I get a table tomorrow evening?",
+          "score": 0.16666666666666666,
+          "answer_preview": "I don't have that detail \u2014 please call us on +1-800-555-1234."
+        },
+        {
+          "question": "Do you support special dietary requests?",
+          "score": 0.5555555555555556,
+          "answer_preview": "Yes, we support all dietary request types including vegetarian, vegan, gluten-free, kosher, and pescatarian. How can I assist with your reservation today?"
+        }
+      ]
+    }
+  },
+  "performance": {
+    "latency": {
+      "simple_no_rag_no_tool": {
+        "trials": 30,
+        "successes": 30,
+        "failures": 0,
+        "ttft": {
+          "mean": 4.30024990333283,
+          "median": 2.713799900000595,
+          "p90": 2.7743966700014426,
+          "p99": 36.42071786100267,
+          "ci95_low": 1.2016969332923897,
+          "ci95_high": 7.3988028733732705
+        },
+        "inter_token_latency": {
+          "mean": 0.09952374996788325,
+          "median": 0.09638186914292635,
+          "p90": 0.11027066931413304,
+          "p99": 0.12266066515985821,
+          "ci95_low": 0.0967460443232837,
+          "ci95_high": 0.10230145561248281
+        },
+        "end_to_end": {
+          "mean": 6.639292343332879,
+          "median": 5.155869900001562,
+          "p90": 5.313214179999341,
+          "p99": 39.44344601500245,
+          "ci95_low": 3.4990833624152855,
+          "ci95_high": 9.779501324250472
+        },
+        "errors": []
+      },
+      "rag_only": {
+        "trials": 30,
+        "successes": 30,
+        "failures": 0,
+        "ttft": {
+          "mean": 2.0507126899996364,
+          "median": 2.0487160500015307,
+          "p90": 2.0659595900040584,
+          "p99": 2.077191696000591,
+          "ci95_low": 2.0458156338614932,
+          "ci95_high": 2.0556097461377796
+        },
+        "inter_token_latency": {
+          "mean": 0.0,
+          "median": 0.0,
+          "p90": 0.0,
+          "p99": 0.0,
+          "ci95_low": 0.0,
+          "ci95_high": 0.0
+        },
+        "end_to_end": {
+          "mean": 2.054110700000941,
+          "median": 2.0513895500007493,
+          "p90": 2.069738980000693,
+          "p99": 2.0820549130022847,
+          "ci95_low": 2.0491227710506528,
+          "ci95_high": 2.059098628951229
+        },
+        "errors": []
+      },
+      "tool_only": {
+        "trials": 30,
+        "successes": 30,
+        "failures": 0,
+        "ttft": {
+          "mean": 3.4459284399990184,
+          "median": 2.7349050999982865,
+          "p90": 2.786403239999345,
+          "p99": 17.914932918001888,
+          "ci95_low": 2.0506926746637637,
+          "ci95_high": 4.841164205334273
+        },
+        "inter_token_latency": {
+          "mean": 0.11192586227510469,
+          "median": 0.11109495967743457,
+          "p90": 0.11680715069897121,
+          "p99": 0.12187984539040436,
+          "ci95_low": 0.11056036864366155,
+          "ci95_high": 0.11329135590654783
+        },
+        "end_to_end": {
+          "mean": 10.248361893332913,
+          "median": 9.629926300003717,
+          "p90": 10.04540218999755,
+          "p99": 25.293279771002943,
+          "ci95_low": 8.801014064306022,
+          "ci95_high": 11.695709722359803
+        },
+        "errors": []
+      },
+      "mixed_rag_plus_tool": {
+        "trials": 30,
+        "successes": 30,
+        "failures": 0,
+        "ttft": {
+          "mean": 2.743976063333442,
+          "median": 2.7164682500006165,
+          "p90": 2.8034954799986735,
+          "p99": 3.166908537000782,
+          "ci95_low": 2.7030410896946666,
+          "ci95_high": 2.7849110369722174
+        },
+        "inter_token_latency": {
+          "mean": 0.10852261821804589,
+          "median": 0.10622902761544531,
+          "p90": 0.11717550918825405,
+          "p99": 0.13072444382611118,
+          "ci95_low": 0.1056987068148826,
+          "ci95_high": 0.11134652962120918
+        },
+        "end_to_end": {
+          "mean": 11.374272453333349,
+          "median": 10.99197070000082,
+          "p90": 13.080320870003199,
+          "p99": 14.981075661997384,
+          "ci95_low": 10.860256813745337,
+          "ci95_high": 11.88828809292136
+        },
+        "errors": []
+      }
+    },
+    "throughput": {
+      "levels": [
+        {
+          "concurrency": 1,
+          "total_turns": 3,
+          "turns_per_second": 0.4325463316234915,
+          "median_ttft_s": 2.0480337999979383,
+          "median_e2e_s": 2.0518570999993244,
+          "errors": 0,
+          "meets_threshold": false
+        },
+        {
+          "concurrency": 2,
+          "total_turns": 6,
+          "turns_per_second": 0.8630919651095883,
+          "median_ttft_s": 2.0521703500016883,
+          "median_e2e_s": 2.056839000000764,
+          "errors": 0,
+          "meets_threshold": false
+        },
+        {
+          "concurrency": 4,
+          "total_turns": 12,
+          "turns_per_second": 1.57860726164018,
+          "median_ttft_s": 2.078395399999863,
+          "median_e2e_s": 2.095784099998127,
+          "errors": 0,
+          "meets_threshold": false
+        },
+        {
+          "concurrency": 6,
+          "total_turns": 18,
+          "turns_per_second": 2.1795816140528945,
+          "median_ttft_s": 2.0753478500009805,
+          "median_e2e_s": 2.1440263999975286,
+          "errors": 0,
+          "meets_threshold": false
+        },
+        {
+          "concurrency": 8,
+          "total_turns": 24,
+          "turns_per_second": 2.678168029511387,
+          "median_ttft_s": 2.086431400002766,
+          "median_e2e_s": 2.0985681999991357,
+          "errors": 0,
+          "meets_threshold": false
+        }
+      ],
+      "max_sustainable_concurrency": 0,
+      "breakpoint_concurrency": 1,
+      "throughput_at_sustainable_tps": 0.0,
+      "thresholds": {
+        "ttft_median_max_s": 2.0,
+        "e2e_median_max_s": 10.0
+      }
+    }
+  }
+}
