@@ -1,0 +1,14 @@
+[
+  {"utterance": "what pasta do you have", "expected_tool": "search_menu"},
+  {"utterance": "show me vegetarian menu", "expected_tool": "search_menu"},
+  {"utterance": "how is the weather today", "expected_tool": "get_weather"},
+  {"utterance": "is it raining outside", "expected_tool": "get_weather"},
+  {"utterance": "check my reservation under ayesha", "expected_tool": "lookup_reservation"},
+  {"utterance": "do i have a booking", "expected_tool": "lookup_reservation"},
+  {"utterance": "my name is alice", "expected_tool": null},
+  {"utterance": "i am vegan", "expected_tool": "search_menu"},
+  {"utterance": "hello there", "expected_tool": null},
+  {"utterance": "book me a flight", "expected_tool": null},
+  {"utterance": "what desserts are available", "expected_tool": "search_menu"},
+  {"utterance": "temperature in italy", "expected_tool": "get_weather"}
+]

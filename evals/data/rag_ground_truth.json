@@ -1,0 +1,22 @@
+[
+  {"query": "What are your opening hours?", "relevant_sources": ["12", "hours"]},
+  {"query": "Where is the restaurant located?", "relevant_sources": ["address", "location"]},
+  {"query": "Do you have valet parking?", "relevant_sources": ["parking", "valet"]},
+  {"query": "What is your dress code?", "relevant_sources": ["dress"]},
+  {"query": "Do you support wheelchair access?", "relevant_sources": ["wheelchair", "access"]},
+  {"query": "What is your cancellation policy?", "relevant_sources": ["cancel", "policy"]},
+  {"query": "Do you have vegetarian options?", "relevant_sources": ["menu", "vegetarian"]},
+  {"query": "What pasta dishes are available?", "relevant_sources": ["pasta", "02"]},
+  {"query": "Which seafood dishes do you serve?", "relevant_sources": ["seafood", "03"]},
+  {"query": "What desserts are offered?", "relevant_sources": ["dessert", "05"]},
+  {"query": "Do you have non alcoholic beverages?", "relevant_sources": ["beverage", "40"]},
+  {"query": "What are the lunch specials?", "relevant_sources": ["lunch", "24"]},
+  {"query": "Do you have seasonal dishes?", "relevant_sources": ["seasonal", "28"]},
+  {"query": "Can I book for large groups?", "relevant_sources": ["group", "reservation"]},
+  {"query": "Is outdoor seating available?", "relevant_sources": ["outdoor", "seating"]},
+  {"query": "Do you offer gluten free dishes?", "relevant_sources": ["gluten", "menu"]},
+  {"query": "Do you serve wine?", "relevant_sources": ["wine", "06"]},
+  {"query": "What cocktails do you have?", "relevant_sources": ["cocktail", "07"]},
+  {"query": "Can I bring children?", "relevant_sources": ["children", "policy"]},
+  {"query": "How can I contact the restaurant?", "relevant_sources": ["phone", "contact"]}
+]

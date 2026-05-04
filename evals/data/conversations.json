@@ -1,0 +1,52 @@
+[
+  {
+    "id": "conv_01_booking_success",
+    "turns": ["hi", "i want to book a table", "tomorrow", "7 pm", "4 people", "my name is Alice", "yes"],
+    "checks": {"task_completion_any": ["confirmed", "all set"], "coherence_any": ["alice", "7 pm", "4"]}
+  },
+  {
+    "id": "conv_02_policy_refusal",
+    "turns": ["book me a flight to dubai"],
+    "checks": {"policy_refusal_any": ["only help", "reservations", "restaurant"]}
+  },
+  {
+    "id": "conv_03_modify_flow",
+    "turns": ["i want to book a table", "friday", "8 pm", "2 people", "my name is sara", "yes", "i want to change my reservation", "change time to 9 pm"],
+    "checks": {"task_completion_any": ["updated", "changed", "9 pm"], "coherence_any": ["sara"]}
+  },
+  {
+    "id": "conv_04_cancel_flow",
+    "turns": ["i want to book a table", "tomorrow", "8 pm", "3 people", "my name is Omar", "yes", "cancel my reservation"],
+    "checks": {"task_completion_any": ["cancelled", "canceled", "done"], "coherence_any": ["omar"]}
+  },
+  {
+    "id": "conv_05_menu_question",
+    "turns": ["what pasta do you have"],
+    "checks": {"task_completion_any": ["pasta", "tagliatelle", "spaghetti", "fettuccine"]}
+  },
+  {
+    "id": "conv_06_weather_question",
+    "turns": ["how is the weather today"],
+    "checks": {"task_completion_any": ["weather", "outdoor", "temperature", "seating"]}
+  },
+  {
+    "id": "conv_07_memory_name",
+    "turns": ["my name is Ayesha", "what is my name?"],
+    "checks": {"coherence_any": ["ayesha"], "task_completion_any": ["ayesha"]}
+  },
+  {
+    "id": "conv_08_dietary_memory",
+    "turns": ["my name is Ayesha", "i am vegetarian", "what can i eat?"],
+    "checks": {"coherence_any": ["vegetarian"], "task_completion_any": ["vegetarian"]}
+  },
+  {
+    "id": "conv_09_lookup",
+    "turns": ["check my reservation under ayesha"],
+    "checks": {"task_completion_any": ["reservation", "found", "no active"]}
+  },
+  {
+    "id": "conv_10_out_of_scope_code",
+    "turns": ["write python code for me"],
+    "checks": {"policy_refusal_any": ["only help", "restaurant", "reservations"]}
+  }
+]
