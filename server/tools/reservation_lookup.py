@@ -98,6 +98,68 @@ def lookup_reservation(name: str) -> dict:
         return {"status": "error", "message": "Could not access reservation records. Please call us directly."}
 
 
+def _latest_active_id(conn: sqlite3.Connection, name: str) -> int | None:
+    row = conn.execute(
+        """SELECT id FROM reservations
+           WHERE LOWER(name) = ? AND status != 'cancelled'
+           ORDER BY id DESC LIMIT 1""",
+        (name.lower().strip(),),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def update_reservation(name: str, fields: dict) -> dict:
+    """
+    Update the latest non-cancelled reservation under *name* with the supplied
+    fields. Allowed keys: date, time, guests, dietary, special, status.
+    """
+    if not name:
+        return {"status": "error", "message": "Name is required."}
+    allowed = {"date", "time", "guests", "dietary", "special", "status"}
+    fields = {k: v for k, v in (fields or {}).items() if k in allowed and v is not None}
+    if not fields:
+        return {"status": "error", "message": "No valid fields to update."}
+
+    _init_db()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rid = _latest_active_id(conn, name)
+        if rid is None:
+            conn.close()
+            return {"status": "error", "message": f"No active reservation found under '{name}'."}
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [rid]
+        conn.execute(f"UPDATE reservations SET {sets} WHERE id = ?", values)
+        conn.commit()
+        conn.close()
+        logger.info(f"[UPDATE] reservation id={rid} for '{name}' set {fields}")
+        return {"status": "ok", "message": f"Reservation for {name} updated.", "fields": fields}
+    except Exception as e:
+        logger.error(f"[UPDATE] DB error: {e}")
+        return {"status": "error", "message": "Could not update reservation."}
+
+
+def cancel_reservation(name: str) -> dict:
+    """Mark the latest active reservation for *name* as cancelled."""
+    if not name:
+        return {"status": "error", "message": "Name is required."}
+    _init_db()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rid = _latest_active_id(conn, name)
+        if rid is None:
+            conn.close()
+            return {"status": "error", "message": f"No active reservation found under '{name}'."}
+        conn.execute("UPDATE reservations SET status = 'cancelled' WHERE id = ?", (rid,))
+        conn.commit()
+        conn.close()
+        logger.info(f"[CANCEL] reservation id={rid} for '{name}' cancelled")
+        return {"status": "ok", "message": f"Reservation for {name} cancelled."}
+    except Exception as e:
+        logger.error(f"[CANCEL] DB error: {e}")
+        return {"status": "error", "message": "Could not cancel reservation."}
+
+
 def save_reservation(name: str, date: str, time: str, guests: str,
                      dietary: str = "", special: str = "",
                      session_id: str = "") -> dict:

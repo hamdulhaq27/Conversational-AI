@@ -15,12 +15,28 @@ const BOT_GREETING: Message = {
     "Hello! I'm the virtual assistant for La Bella Tavola 🍝.\nI can help you with reservations, opening hours, menu questions, and more.\nHow may I assist you today?",
 };
 
+const USER_NAME_KEY = "la_bella_user_name";
+
 const ChatMain = () => {
   const [messages, setMessages] = useState<Message[]>([BOT_GREETING]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isReceiving, setIsReceiving] = useState(false);
   const [waitingLong, setWaitingLong] = useState(false); // Show "Generating..." after delay
+  // Persisted across browser reloads so returning customers are recognized.
+  const [knownName, setKnownName] = useState<string | null>(() => {
+    try {
+      return typeof window !== "undefined"
+        ? window.localStorage.getItem(USER_NAME_KEY)
+        : null;
+    } catch {
+      return null;
+    }
+  });
+  const knownNameRef = useRef<string | null>(knownName);
+  useEffect(() => {
+    knownNameRef.current = knownName;
+  }, [knownName]);
   const ws = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const requestStartRef = useRef<number>(0);
@@ -96,6 +112,16 @@ const ChatMain = () => {
             ...prev,
             { role: "assistant", content: `**Error:** ${data.error}` },
           ]);
+        } else if (data.type === "user_known") {
+          if (data.name && data.name !== knownNameRef.current) {
+            console.log("[CHATBOT] Server recognized user:", data.name);
+            try {
+              window.localStorage.setItem(USER_NAME_KEY, data.name);
+            } catch (e) {
+              console.warn("[CHATBOT] Could not persist user name:", e);
+            }
+            setKnownName(data.name);
+          }
         } else if (data.type === "audio_response") {
           console.log("[CHATBOT] Received audio response, playing...");
           try {
@@ -175,6 +201,7 @@ const ChatMain = () => {
       JSON.stringify({
         session_id: sessionId,
         message: userMessage,
+        known_name: knownNameRef.current,
       })
     );
   };
@@ -229,6 +256,7 @@ const ChatMain = () => {
               type: "audio",
               session_id: sessionId,
               audio_base64: base64Audio,
+              known_name: knownNameRef.current,
             })
           );
         };

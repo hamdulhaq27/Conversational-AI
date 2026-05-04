@@ -1,0 +1,12 @@
+{
+  "test-session-id": {
+    "session_id": "test-session-id",
+    "name": "Haider",
+    "dietary_preferences": null,
+    "special_requests": null,
+    "current_booking": {},
+    "reservations": [],
+    "created_at": "2026-05-03T23:57:01Z",
+    "last_updated": "2026-05-03T23:57:01Z"
+  }
+}

@@ -21,6 +21,7 @@ import time
 import logging
 import asyncio
 import hashlib
+from datetime import datetime
 from typing import Generator
 from functools import lru_cache
 
@@ -54,6 +55,24 @@ WINDOW_SIZE     = 5       # Keep history small for fast prompt eval
 MAX_TOKENS      = 180     # Enough for a complete sentence, not an essay
 TEMPERATURE     = 0.2     # Near-deterministic
 REQUEST_TIMEOUT = 300
+
+def get_now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def log_network(msg: str):
+    print(f"\n[{get_now()}] [NETWORK] User Message: \"{msg}\"", flush=True)
+
+def log_crm(action: str, details: str):
+    print(f"[{get_now()}] [CRM] {action}: {details}", flush=True)
+
+def log_rag(query: str, doc_count: int):
+    print(f"[{get_now()}] [RAG] Query: \"{query}\" -> Retrieved {doc_count} chunks", flush=True)
+
+def log_llm_start(session_id: str):
+    print(f"[{get_now()}] [LLM] Generating response for {session_id[:8]}...", flush=True)
+
+def log_llm_end(response: str):
+    print(f"[{get_now()}] [LLM] Response: \"{response}\"\n", flush=True)
 
 _sessions: dict[str, dict] = {}
 
@@ -111,6 +130,7 @@ def _fetch_rag_context(query: str) -> str:
         t0 = time.time()
         docs = rag.retrieve_documents(query)
         elapsed = time.time() - t0
+        log_rag(query, len(docs))
         logger.info(f"[RAG] Retrieved {len(docs)} docs in {elapsed:.2f}s")
         if not docs:
             _cache_set(cache_key, {"context": ""})
@@ -456,7 +476,7 @@ def _next_stage(session: dict, intent: str) -> str:
 # Message array construction
 # ===========================================================================
 
-def _build_messages(session: dict, user_message: str, session_id: str,
+def _build_messages(session: dict, user_message: str, user_data: dict,
                     retrieved_context: str = "",
                     tool_used: str | None = None) -> list[dict]:
     stage        = session["stage"]
@@ -470,7 +490,6 @@ def _build_messages(session: dict, user_message: str, session_id: str,
                                       modify_field=modify_field)
 
     # Append CRM user info (kept brief to avoid bloating prompt)
-    user_data = get_user(session_id)
     if user_data and user_data.get("name"):
         system_text += f"\n\nReturning customer: {user_data.get('name')}."
         if user_data.get("dietary_preferences"):
@@ -615,23 +634,26 @@ async def tool_orchestrator(session_id: str, user_message: str,
     t0             = time.time()
 
     # ── CRM: name / dietary / special ───────────────────────────────────────
-    if extracted_memory.get("name"):
-        res = await _run_tool_async(update_user, session_id, "name", extracted_memory["name"], timeout=1.5)
+    name = extracted_memory.get("name")
+    if name:
+        log_crm("update_user", f"Updating record for '{name}'")
+        res = await _run_tool_async(update_user, name, {"name": name}, session_id, timeout=1.5)
         logger.info(f"[TOOL] update_user(name) → {res}")
-        # CRM update doesn't need to return context to the LLM
-        return "", None
 
-    if extracted_memory.get("dietary_preferences"):
-        res = await _run_tool_async(update_user, session_id, "dietary_preferences",
-                                    extracted_memory["dietary_preferences"], timeout=1.5)
+    diet = extracted_memory.get("dietary_preferences")
+    if diet and name:
+        log_crm("update_user", f"Saving dietary: {diet} for '{name}'")
+        res = await _run_tool_async(update_user, name, {"dietary_preferences": diet}, session_id, timeout=1.5)
         logger.info(f"[TOOL] update_user(dietary) → {res}")
-        return "", None
 
-    if extracted_memory.get("special_requests"):
-        res = await _run_tool_async(update_user, session_id, "special_requests",
-                                    extracted_memory["special_requests"], timeout=1.5)
+    special = extracted_memory.get("special_requests")
+    if special and name:
+        log_crm("update_user", f"Saving special request: {special} for '{name}'")
+        res = await _run_tool_async(update_user, name, {"special_requests": special}, session_id, timeout=1.5)
         logger.info(f"[TOOL] update_user(special) → {res}")
-        return "", None
+
+    if any([name, diet, special]) and not name:
+        logger.warning("[CRM] Info detected but no name available to key the record.")
 
     # ── Weather ──────────────────────────────────────────────────────────────
     if _WEATHER_TRIGGER_RX.search(msg):
@@ -764,13 +786,27 @@ async def chat_stream(session_id: str, user_message: str):
     """
     import httpx
 
+    log_network(user_message)
     session = get_session(session_id)
     if session is None:
         raise ValueError(f"Session '{session_id}' not found.")
 
+    # ── CRM Lookup: Load profile if we have a name ───────────────────────────
+    name = session["memory"].get("name")
+    user_data = {}
+    if name:
+        user_data = get_user(name)
+        if user_data:
+            log_crm("get_user", f"Loaded data for '{name}': {user_data}")
+            # Seed memory from CRM if not already done
+            if not session.get("seeded_from_crm"):
+                for k in ("dietary_preferences", "special_requests"):
+                    if not session["memory"].get(k) and user_data.get(k):
+                        session["memory"][k] = user_data[k]
+                session["seeded_from_crm"] = True
+
     # ── Deterministic shortcut: simple greetings ─────────────────────────────
     if _is_greeting(user_message):
-        user_data = get_user(session_id)
         if user_data and user_data.get("name"):
             greeting = f"Welcome back, {user_data['name']}! Would you like to make a reservation or do you have a question?"
         else:
@@ -808,17 +844,15 @@ async def chat_stream(session_id: str, user_message: str):
         _date = memory.get("date", "")
         _time = memory.get("time", "")
         if _name and _date and _time:
-            asyncio.create_task(
-                _run_tool_async(
-                    save_reservation,
-                    _name, _date, _time,
-                    memory.get("guests", ""),
-                    memory.get("dietary_preferences", ""),
-                    memory.get("special_requests", ""),
-                    session_id,
-                    timeout=3.0
-                )
-            )
+            res_data = {
+                "date":    _date,
+                "time":    _time,
+                "guests":  memory.get("guests", "2"),
+                "dietary": memory.get("dietary_preferences", ""),
+                "special": memory.get("special_requests", ""),
+            }
+            log_crm("add_reservation", f"Saving reservation for '{_name}'")
+            add_reservation(_name, res_data, session_id)
         yield reply
         return
 
@@ -844,8 +878,13 @@ async def chat_stream(session_id: str, user_message: str):
     # Merge: tool context takes priority over RAG for general queries
     final_context = tool_context or retrieved_context
 
+    # Merge current turn updates with loaded profile
+    user_profile = {**user_data, **(tool_context if isinstance(tool_context, dict) else {})}
+    for k, v in memory.items():
+        if v: user_profile[k] = v
+
     # ── Build LLM messages ────────────────────────────────────────────────────
-    messages = _build_messages(session, user_message, session_id,
+    messages = _build_messages(session, user_message, user_profile,
                                retrieved_context=final_context,
                                tool_used=tool_used)
 
@@ -871,6 +910,7 @@ async def chat_stream(session_id: str, user_message: str):
     first_token   = None
 
     logger.info(f"[LLM] [{session_id}] Calling model ({len(messages)} msgs)...")
+    log_llm_start(session_id)
 
     try:
         client = await _get_client()
@@ -911,6 +951,8 @@ async def chat_stream(session_id: str, user_message: str):
         logger.error(f"[ERROR] {e}")
         full_response = "Sorry, I'm having trouble right now. Please try again."
         yield full_response
+
+    log_llm_end(full_response)
 
     # ── Fallback ──────────────────────────────────────────────────────────────
     if not full_response.strip():

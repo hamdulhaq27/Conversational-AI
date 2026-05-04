@@ -26,11 +26,12 @@ from conversation_manager import (
     reset_session,
     session_debug_info,
     chat_stream,
+    get_known_name,
     _warmup_model,
 )
 
-from voice.asr_service import asr_service_instance
-from voice.tts_service import tts_service_instance
+# from voice.asr_service import asr_service_instance
+# from voice.tts_service import tts_service_instance
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("api")
@@ -48,16 +49,7 @@ app.add_middleware(
 # ── FAILSAFE: fallback removed per user request ────────
 
 
-@app.on_event("startup")
-async def startup_warmup():
-    """Pre-warm the AI model so the first real user request is fast."""
-    logger.info("[SERVER] Startup — triggering background model warm-up...")
-    # Warmup LLM
-    asyncio.create_task(_warmup_model())
-    
-    # Pre-load ASR and TTS models into memory using a background thread so it does not block the event loop
-    asyncio.create_task(asyncio.to_thread(asr_service_instance.load))
-    asyncio.create_task(asyncio.to_thread(tts_service_instance.load))
+# Startup events removed to prevent 'Event loop is closed' crashes on Windows
 
 
 @app.get("/health")
@@ -116,9 +108,10 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "error", "error": "Invalid payload"})
                 continue
 
-            msg_type = raw.get("type", "text")
+            msg_type   = raw.get("type", "text")
             session_id = raw.get("session_id")
-            message = ""
+            known_name = raw.get("known_name")  # frontend-cached customer name
+            message    = ""
 
             if msg_type in ["audio", "audio_partial"]:
                 audio_base64 = raw.get("audio_base64")
@@ -184,6 +177,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 continue
 
             # ── Stream reply tokens ──────────────────────────────────────────
+            print(f"\n[NETWORK] Received message: \"{message}\" (Session: {session_id})", flush=True)
             logger.info(f"[SERVER] Request received at /ws/chat")
             logger.info(f"[SERVER] User message: \"{message}\"")
             request_start = time.time()
@@ -192,7 +186,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 logger.info(f"[SERVER] Calling AI model...")
 
                 full_response = ""
-                async for token in chat_stream(session_id, message):
+                async for token in chat_stream(session_id, message, known_name=known_name):
                     full_response += token
                     await websocket.send_json({"type": "token", "token": token})
                     await asyncio.sleep(0)  # yield control to flush frame
@@ -201,6 +195,12 @@ async def websocket_chat(websocket: WebSocket) -> None:
                 logger.info(f"[SERVER] AI response received in {total_time:.2f} seconds")
                 logger.info(f"[PERFORMANCE] Total response time: {total_time:.2f} seconds")
                 logger.info(f"[SERVER] Sending response to client")
+
+                # Echo recognized name so the frontend can cache it across reloads
+                recognized = get_known_name(session_id)
+                if recognized and recognized != known_name:
+                    await websocket.send_json({"type": "user_known", "name": recognized})
+
                 await websocket.send_json({"type": "end"})
                 
                 # TTS generation

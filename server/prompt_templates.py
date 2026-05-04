@@ -1,36 +1,27 @@
 """
-Phase III - Prompt Templates
-Restaurant Reservation Conversational AI
-
-Strategy for qwen:1.8b:
-  - System prompt is stage-specific and SHORT (model gets confused by long prompts)
-  - NO "retrieval-only" framing on reservation stages — that causes hallucination
-  - RAG context only injected on general/answering stages, not during booking flow
-  - Few-shot examples injected as real message turns (NOT in system prompt text)
-  - Each stage has a clear, single task sentence
+Prompt Templates — La Bella Tavola Conversational AI
+Clean, LLM-first design:
+  - Stage-specific system prompts (short, unambiguous)
+  - CRM data injected directly as plain text (no intermediate plan)
+  - Few-shot examples as real message turns
+  - No planner, no compile_plan, no validate_plan
 """
 
-RESTAURANT_INFO = {
-    "name":               "La Bella Tavola",
-    "cuisine":            "Italian-Mediterranean",
-    "hours":              "12 PM to 11 PM daily",
-    "location":           "123 Main Street, Downtown",
-    "phone":              "+1-800-555-1234",
-    "max_table_capacity": "up to 8 guests",
-    "lunch_reservation":  "walk-ins welcome, reservations recommended on weekends",
-    "dinner_reservation": "reservations strongly recommended, especially Fri-Sun",
-    "parking":            "street parking available, valet on weekends",
-    "dress_code":         "smart casual",
-}
+import os
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 SIGNAL_KEYS     = ["date", "time", "guests", "name", "dietary_preferences", "special_requests"]
 REQUIRED_FIELDS = ["date", "time", "guests", "name"]
+_VAGUE_TIMES    = {"evening", "morning", "afternoon"}
 
-# Vague time words that need a specific-time follow-up
-_VAGUE_TIMES = {"evening", "morning", "afternoon"}
-
-CRM_PROMPT = ""  # Kept for import compatibility — CRM is handled by tool orchestrator
-
+_RESTAURANT_FACTS = (
+    "La Bella Tavola — Italian-Mediterranean restaurant. "
+    "Open 12 PM–11 PM daily. 123 Main Street, Downtown. "
+    "Phone: +1-800-555-1234. Smart casual dress code. "
+    "Street parking; valet on weekends. Max 8 guests per table."
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,173 +31,195 @@ def _missing_fields(memory: dict) -> list[str]:
     missing = []
     for k in REQUIRED_FIELDS:
         v = memory.get(k)
-        if not v:
-            missing.append(k)
-        elif k == "time" and str(v).lower() in _VAGUE_TIMES:
+        if not v or (k == "time" and str(v).lower() in _VAGUE_TIMES):
             missing.append(k)
     return missing
+
 
 def _next_field(memory: dict) -> str:
     m = _missing_fields(memory)
     return m[0] if m else ""
 
+
 def _collected_summary(memory: dict) -> str:
-    _DISPLAY_KEYS = REQUIRED_FIELDS + ["dietary_preferences", "special_requests"]
     parts = []
-    for k in _DISPLAY_KEYS:
+    for k in REQUIRED_FIELDS + ["dietary_preferences", "special_requests"]:
         v = memory.get(k)
-        if not v:
-            continue
-        if k == "time" and str(v).lower() in _VAGUE_TIMES:
-            continue
-        parts.append(f"{k}: {v}")
+        if v and not (k == "time" and str(v).lower() in _VAGUE_TIMES):
+            parts.append(f"{k}: {v}")
     return ", ".join(parts) if parts else "nothing yet"
 
-def _missing_summary(memory: dict) -> str:
-    missing = _missing_fields(memory)
-    return ", ".join(missing) if missing else "none"
 
-def _history_block(recent_turns: list[dict]) -> str:
-    if not recent_turns:
-        return "(no prior turns)"
-    lines = []
-    for t in recent_turns:
-        label = "Customer" if t["role"] == "user" else "Assistant"
-        lines.append(f'{label}: {t["content"]}')
-    return "\n".join(lines)
+def _crm_block(user_data: dict) -> str:
+    """Render non-empty CRM fields plus active reservation as a plain-text block."""
+    order = ["name", "dietary_preferences", "special_requests"]
+    active = {k: user_data.get(k) for k in order if user_data.get(k)}
+
+    reservations = user_data.get("reservations") or []
+    latest_active = next(
+        (r for r in reversed(reservations) if r.get("status") != "cancelled"),
+        None,
+    )
+
+    if not active and not latest_active:
+        return ""
+
+    lines = ["[AUTHORITATIVE USER MEMORY]"]
+    for k, v in active.items():
+        lines.append(f"  {k}: {v}")
+    if latest_active:
+        lines.append(
+            f"  current_reservation: {latest_active.get('date','?')} at "
+            f"{latest_active.get('time','?')} for {latest_active.get('guests','?')} guests"
+        )
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------
-# System prompt — stage-specific, SHORT, no contradictory framing
+# System prompt builder — one function, dispatches by stage
 # ---------------------------------------------------------------------------
 
-def build_system_prompt_text(memory: dict, recent_turns: list[dict],
-                             stage: str, retrieved_context: str = "",
-                             modify_field: str | None = None) -> str:
+def build_system_prompt(memory: dict, stage: str,
+                        user_data: dict | None = None,
+                        retrieved_context: str = "",
+                        modify_field: str | None = None,
+                        retry_hint: str | None = None) -> str:
+    """
+    Build a short, stage-specific system prompt.
+    CRM data is injected as plain text — no plan, no compile step.
+    """
+    crm   = _crm_block(user_data or {})
+    retry = f"\n[CORRECTION NEEDED]: {retry_hint}\n" if retry_hint else ""
 
-    next_f    = _next_field(memory)
-    collected = _collected_summary(memory)
+    # Dietary safety line — only added when CRM has a preference
+    diet_line = ""
+    diet = (user_data or {}).get("dietary_preferences", "")
+    if diet:
+        diet_line = f"IMPORTANT: This customer is {diet}. Only suggest {diet}-appropriate food.\n"
 
-    # ── RESERVATION STAGES — no RAG framing, pure conversational ────────────
+    # Name reminder — only when CRM has a name
+    name_line = ""
+    crm_name = (user_data or {}).get("name", "")
+    if crm_name:
+        name_line = f"Address the customer as {crm_name}.\n"
+
+    base_identity = (
+        "You are the front-of-house host at La Bella Tavola, an Italian-Mediterranean restaurant.\n"
+        "YOUR ONLY JOB: Help guests make, modify, or cancel table reservations at this restaurant, "
+        "and answer questions about La Bella Tavola's menu, hours, and services.\n"
+        "STRICT RULES:\n"
+        "- Reply in ONE short, natural sentence. Never use bullet points, numbered lists, or steps.\n"
+        "- NEVER ask about the 'purpose' of a booking — every reservation here is a restaurant table booking.\n"
+        "- NEVER mention movies, cinemas, flights, hotels, or anything unrelated to this restaurant.\n"
+        "- Never tell the customer to visit a website, use a link, fill a form, or do steps themselves — YOU handle the booking.\n"
+        "- Use the [AUTHORITATIVE USER MEMORY] block as ground truth. Never ask for info already in it.\n"
+        "- If the customer's words contradict memory, trust the customer.\n"
+        "- If the customer wants to make a reservation, guide them through it — do not ask what the reservation is for.\n"
+    )
+
     if stage == "greeting":
+        if crm_name:
+            return (
+                base_identity
+                + name_line + diet_line + crm
+                + f"Greet {crm_name} warmly by name in ONE sentence and ask if they'd like to make a reservation or have a question about the restaurant."
+                + retry
+            )
         return (
-            "You are a friendly host at La Bella Tavola Italian restaurant. "
-            "Greet the customer warmly in one sentence and ask how you can help."
+            base_identity
+            + "Welcome the guest to La Bella Tavola in ONE warm sentence and offer to help them make a table reservation or answer questions about the restaurant."
+            + retry
         )
 
-    elif stage == "collecting":
-        field_prompts = {
-            "date":   "You are taking a reservation at La Bella Tavola. Ask only: what date?",
-            "time":   "You are taking a reservation at La Bella Tavola. Ask only: what time? (needs a specific time like 7 PM, not just 'evening')",
-            "guests": "You are taking a reservation at La Bella Tavola. Ask only: how many guests?",
-            "name":   "You are taking a reservation at La Bella Tavola. Ask for the name and any dietary preferences or special requests.",
-        }
-        return field_prompts.get(next_f, "You are taking a reservation. Ask for the next missing detail.")
-
-    elif stage == "confirming":
+    if stage == "collecting":
+        next_f   = _next_field(memory)
+        already  = _collected_summary(memory)
+        field_ask = {
+            "date":    "Reply with ONE short question asking what date they would like. Do not list options or steps.",
+            "time":    "Reply with ONE short question asking what specific time (e.g. 7 PM). Do not accept vague answers.",
+            "guests":  "Reply with ONE short question asking how many guests. Do not list options.",
+            "name":    "Reply with ONE short question asking for the name to book under, and dietary preferences or special requests.",
+        }.get(next_f, "Reply with ONE short question for the next missing reservation detail.")
         return (
-            f"You are confirming a reservation at La Bella Tavola. "
-            f"Repeat these details and ask if correct: {collected}. "
-            "One sentence only."
+            base_identity
+            + name_line + diet_line + crm
+            + f"Already collected: {already}.\n"
+            + f"Next missing field: {next_f}.\n"
+            + field_ask
+            + retry
         )
 
-    elif stage == "confirmed":
-        _date   = memory.get("date")   or "the date"
-        _time   = memory.get("time")   or "the time"
-        _guests = memory.get("guests") or "your group"
-        _name   = memory.get("name")   or "you"
-        extras  = []
+    if stage == "confirming":
+        collected = _collected_summary(memory)
+        return (
+            base_identity
+            + name_line + crm
+            + f"Read these details back in ONE friendly sentence and ask 'shall I confirm?': {collected}.\n"
+            + "Do NOT add extra fields, steps, or links."
+            + retry
+        )
+
+    if stage == "confirmed":
+        mem_name = memory.get("name") or crm_name or "you"
+        extras = []
         if memory.get("dietary_preferences"):
             extras.append(memory["dietary_preferences"])
+        elif diet:
+            extras.append(diet)
         if memory.get("special_requests"):
             extras.append(memory["special_requests"])
         extra_str = f", {', '.join(extras)}" if extras else ""
         return (
-            f"Confirm the reservation in ONE short sentence: "
-            f"table for {_guests} on {_date} at {_time} under {_name}{extra_str}. "
-            "End warmly. No extra questions."
+            base_identity
+            + f"Confirm in ONE warm sentence that the booking is set: table for "
+            f"{memory.get('guests','?')} on {memory.get('date','?')} at "
+            f"{memory.get('time','?')} under {mem_name}{extra_str}. "
+            "End with 'see you then!' or similar. Do NOT add lists, steps, or links."
+            + retry
         )
 
-    elif stage == "modifying":
-        if not memory.get("name"):
+    if stage == "modifying":
+        name_to_use = memory.get("name") or crm_name
+        if not name_to_use:
+            return base_identity + "Ask: what name is the reservation under?" + retry
+        if modify_field and memory.get(modify_field):
+            label = {"date": "date", "time": "time", "guests": "number of guests"}.get(modify_field, modify_field)
             return (
-                "A customer wants to modify their reservation at La Bella Tavola. "
-                "Ask only: what name is the reservation under?"
+                base_identity
+                + f"Confirm the change for {name_to_use}: {label} updated to {memory[modify_field]}. One sentence."
+                + retry
             )
-        else:
-            if modify_field and memory.get(modify_field):
-                field_label = {"date": "date", "time": "time", "guests": "number of guests"}.get(
-                    modify_field, modify_field
-                )
-                return (
-                    f"Confirm the reservation change for {memory.get('name')}: "
-                    f"{field_label} updated to {memory.get(modify_field)}. One sentence."
-                )
-            return (
-                f"You have the reservation for {memory.get('name')}. "
-                "Ask only: what would you like to change — the date, the time, or the number of guests?"
-            )
-
-    elif stage == "cancelling":
-        if not memory.get("name"):
-            return (
-                "A customer wants to cancel their reservation. "
-                "Ask only: what name is it under?"
-            )
-        else:
-            return (
-                f"Confirm cancellation of {memory.get('name')}'s reservation in one friendly sentence."
-            )
-
-    # ── GENERAL / ANSWERING — inject tool result or RAG context ─────────────
-    else:
-        # Build restaurant facts as fallback even without RAG
-        facts = (
-            "La Bella Tavola — Italian-Mediterranean restaurant. "
-            "Open 12 PM–11 PM daily. Located at 123 Main Street, Downtown. "
-            "Phone: +1-800-555-1234. Smart casual dress code. "
-            "Street parking, valet on weekends. Up to 8 guests per table."
+        return (
+            base_identity
+            + f"You have {name_to_use}'s reservation. Ask: what would you like to change — date, time, or guest count?"
+            + retry
         )
 
-        base = (
-            "You are a helpful assistant for La Bella Tavola restaurant. "
-            "Answer the customer's question in 1–3 sentences using only the information below. "
-            "If the answer is not there, say: 'I don't have that detail — please call us on +1-800-555-1234.'\n\n"
+    if stage == "cancelling":
+        name_to_use = memory.get("name") or crm_name
+        if not name_to_use:
+            return base_identity + "Ask: what name is the reservation under?" + retry
+        return (
+            base_identity
+            + f"Confirm cancellation of {name_to_use}'s reservation in one friendly sentence."
+            + retry
         )
 
-        if retrieved_context and retrieved_context.strip():
-            base += f"INFORMATION:\n{retrieved_context}\n"
-        else:
-            base += f"INFORMATION:\n{facts}\n"
-
-        return base
-
-
-def build_system_prompt(memory: dict, recent_turns: list[dict],
-                        stage: str = "collecting",
-                        retrieved_context: str = "",
-                        modify_field: str | None = None) -> str:
-    return build_system_prompt_text(
-        memory, recent_turns, stage,
-        retrieved_context=retrieved_context,
-        modify_field=modify_field
+    # general / answering
+    info = retrieved_context.strip() if retrieved_context.strip() else _RESTAURANT_FACTS
+    return (
+        base_identity
+        + name_line + diet_line + crm
+        + "Answer the customer's question in 1–3 sentences using ONLY the restaurant information below.\n"
+        + "If the customer seems to want a table reservation, ask if they'd like to make one.\n"
+        + "If the answer is not in the information below, say: 'I don't have that detail — please call us on +1-800-555-1234.'\n\n"
+        + f"RESTAURANT INFORMATION:\n{info}\n"
+        + retry
     )
-
-def build_modification_prompt(memory: dict, recent_turns: list[dict],
-                               modify_field: str | None = None) -> str:
-    return build_system_prompt_text(memory, recent_turns, "modifying",
-                                    modify_field=modify_field)
-
-def build_cancellation_prompt(memory: dict, recent_turns: list[dict]) -> str:
-    return build_system_prompt_text(memory, recent_turns, "cancelling")
-
-def build_confirmation_prompt(memory: dict, recent_turns: list[dict]) -> str:
-    return build_system_prompt_text(memory, recent_turns, "confirming")
 
 
 # ---------------------------------------------------------------------------
-# Few-shot message pairs — these are what actually steer Qwen 1.8B
-# Keep them SHORT and concrete — model copies the pattern exactly
+# Few-shot examples — unchanged, these steer Qwen effectively
 # ---------------------------------------------------------------------------
 
 FEW_SHOT_GREETING = [
@@ -214,6 +227,13 @@ FEW_SHOT_GREETING = [
     {"role": "assistant", "content": "Welcome to La Bella Tavola! Would you like to make a reservation or do you have a question?"},
     {"role": "user",      "content": "Hello, can I book a table?"},
     {"role": "assistant", "content": "Of course! What date were you thinking?"},
+]
+
+FEW_SHOT_RETURNING_USER = [
+    {"role": "user",      "content": "Hi there"},
+    {"role": "assistant", "content": "Welcome back, John! Great to see you again — shall I make a reservation or can I help with something else?"},
+    {"role": "user",      "content": "What's good today?"},
+    {"role": "assistant", "content": "Since you prefer vegetarian options, I'd recommend our Truffle Mushroom Risotto — it's excellent tonight."},
 ]
 
 FEW_SHOT_DATE = [
@@ -228,8 +248,6 @@ FEW_SHOT_TIME = [
     {"role": "assistant", "content": "Great — what time on March 15th?"},
     {"role": "user",      "content": "Tomorrow evening."},
     {"role": "assistant", "content": "Tomorrow evening — what time exactly, like 7 or 8 PM?"},
-    {"role": "user",      "content": "This Saturday."},
-    {"role": "assistant", "content": "Saturday it is — what time were you thinking?"},
 ]
 
 FEW_SHOT_GUESTS = [
@@ -244,43 +262,31 @@ FEW_SHOT_NAME = [
     {"role": "assistant", "content": "Table for 2 — what name for the booking, and any dietary preferences or special requests?"},
     {"role": "user",      "content": "4 people."},
     {"role": "assistant", "content": "Table for 4 — what name, and any dietary needs or special occasions?"},
-    {"role": "user",      "content": "3 guests."},
-    {"role": "assistant", "content": "Got it — what name should I put the reservation under? Any dietary needs?"},
 ]
 
 FEW_SHOT_CONFIRMING = [
-    {"role": "user",      "content": "Ahmed Khan, no dietary needs."},
-    {"role": "assistant", "content": "So that's a table for 4 on Saturday at 7 PM under Ahmed Khan — shall I confirm?"},
-    {"role": "user",      "content": "Sara Ali, I'm vegetarian."},
-    {"role": "assistant", "content": "Table for 2 on Friday at 8 PM under Sara Ali, vegetarian noted — does that look right?"},
-    {"role": "user",      "content": "Bilal Ahmed."},
-    {"role": "assistant", "content": "Table for 2 on March 20 at 8 PM under Bilal Ahmed — shall I confirm?"},
+    {"role": "user",      "content": "CUSTOMER_NAME, no dietary needs."},
+    {"role": "assistant", "content": "So that's a table for 4 on Saturday at 7 PM under CUSTOMER_NAME — shall I confirm?"},
+    {"role": "user",      "content": "ANOTHER_NAME, I'm vegetarian."},
+    {"role": "assistant", "content": "Table for 2 on Friday at 8 PM under ANOTHER_NAME, vegetarian noted — does that look right?"},
 ]
 
 FEW_SHOT_CONFIRMED = [
     {"role": "user",      "content": "Yes, confirm please."},
-    {"role": "assistant", "content": "All set — your table for 4 on Saturday at 7 PM under Ahmed Khan is confirmed, see you then!"},
+    {"role": "assistant", "content": "All set — your table for 4 on Saturday at 7 PM under CUSTOMER_NAME is confirmed, see you then!"},
     {"role": "user",      "content": "Perfect, go ahead."},
-    {"role": "assistant", "content": "Confirmed! Table for 2 on March 20 at 8 PM under Bilal Ahmed is booked — see you soon!"},
-    {"role": "user",      "content": "Yes that's right."},
-    {"role": "assistant", "content": "Wonderful — your table for 3 on Sunday at 7 PM under Sara Ali is all set!"},
+    {"role": "assistant", "content": "Confirmed! Table for 2 on March 20 at 8 PM under ANOTHER_NAME is booked — see you soon!"},
 ]
 
 FEW_SHOT_MODIFYING_NO_NAME = [
     {"role": "user",      "content": "I need to change my booking."},
     {"role": "assistant", "content": "Sure — what name is the reservation under?"},
-    {"role": "user",      "content": "I want to update my reservation."},
-    {"role": "assistant", "content": "Of course — what name is the booking under?"},
 ]
 
 FEW_SHOT_MODIFYING_WHAT = [
-    {"role": "user",      "content": "It's under Ali Raza."},
+    {"role": "user",      "content": "It's under EXAMPLE_NAME."},
     {"role": "assistant", "content": "Got it — what would you like to change: the date, the time, or the number of guests?"},
-    {"role": "user",      "content": "My name is Sara Ahmed."},
-    {"role": "assistant", "content": "Found Sara Ahmed's reservation — what would you like to update: date, time, or guest count?"},
 ]
-
-FEW_SHOT_MODIFYING = FEW_SHOT_MODIFYING_NO_NAME  # legacy alias
 
 FEW_SHOT_CANCELLING = [
     {"role": "user",      "content": "I want to cancel my reservation."},
@@ -294,41 +300,30 @@ FEW_SHOT_GENERAL = [
     {"role": "assistant", "content": "We're open every day from 12 PM to 11 PM."},
     {"role": "user",      "content": "Is there parking?"},
     {"role": "assistant", "content": "Yes — street parking is available, and we offer valet on weekends."},
-    {"role": "user",      "content": "What cuisine do you serve?"},
-    {"role": "assistant", "content": "Italian-Mediterranean — fresh pasta, grilled meats, and seafood."},
-    {"role": "user",      "content": "Do I need a reservation for lunch?"},
-    {"role": "assistant", "content": "Walk-ins are welcome for lunch, though we recommend booking on weekends."},
 ]
 
-# Tool-result few-shots — used when a tool just ran
 FEW_SHOT_TOOL_MENU = [
     {"role": "user",      "content": "What pasta dishes do you have?"},
-    {"role": "assistant", "content": "We have Tagliatelle al Ragù Bolognese ($20), Spaghetti ai Frutti di Mare ($22), and Fettuccine Alfredo ($18), among others. Would you like more details?"},
+    {"role": "assistant", "content": "We have Tagliatelle al Ragù Bolognese ($20), Spaghetti ai Frutti di Mare ($22), and Fettuccine Alfredo ($18), among others."},
     {"role": "user",      "content": "Do you have vegetarian options?"},
-    {"role": "assistant", "content": "Yes — vegetarian options include Bruschetta al Pomodoro ($9), Burrata and Heirloom Tomatoes ($14), and Arancini Siciliani ($11). Shall I list more?"},
+    {"role": "assistant", "content": "Yes — vegetarian options include Bruschetta al Pomodoro ($9), Burrata and Heirloom Tomatoes ($14), and Arancini Siciliani ($11)."},
 ]
 
 FEW_SHOT_TOOL_WEATHER = [
     {"role": "user",      "content": "What's the weather like?"},
     {"role": "assistant", "content": "It's currently 18°C and clear — outdoor seating looks great today!"},
-    {"role": "user",      "content": "Is outdoor seating a good idea?"},
-    {"role": "assistant", "content": "It's a bit rainy right now, so our indoor tables would be more comfortable today."},
 ]
 
 FEW_SHOT_TOOL_LOOKUP = [
     {"role": "user",      "content": "Check my reservation under Ahmed."},
     {"role": "assistant", "content": "I found a reservation for Ahmed on Friday at 7 PM for 4 guests — is that the one?"},
-    {"role": "user",      "content": "Do I have a booking?"},
-    {"role": "assistant", "content": "I couldn't find a reservation under that name. Would you like to make a new booking?"},
 ]
 
 
 def get_few_shot_examples(stage: str, memory: dict,
                           modify_field: str | None = None,
-                          tool_used: str | None = None) -> list[dict]:
-    """Return the right few-shot message pairs for the current stage/tool."""
-
-    # Tool-specific few-shots take priority
+                          tool_used: str | None = None,
+                          user_data: dict | None = None) -> list[dict]:
     if tool_used == "search_menu":
         return FEW_SHOT_TOOL_MENU
     if tool_used == "get_weather":
@@ -338,17 +333,12 @@ def get_few_shot_examples(stage: str, memory: dict,
 
     next_f = _next_field(memory)
     if stage == "greeting":
-        return FEW_SHOT_GREETING
-    elif stage == "collecting":
+        return FEW_SHOT_RETURNING_USER if (memory.get("name") or (user_data or {}).get("name")) else FEW_SHOT_GREETING
+    if stage == "collecting":
         return {"date": FEW_SHOT_DATE, "time": FEW_SHOT_TIME,
                 "guests": FEW_SHOT_GUESTS, "name": FEW_SHOT_NAME}.get(next_f, FEW_SHOT_GREETING)
-    elif stage == "confirming":
-        return FEW_SHOT_CONFIRMING
-    elif stage == "confirmed":
-        return FEW_SHOT_CONFIRMED
-    elif stage == "modifying":
-        return FEW_SHOT_MODIFYING_WHAT if memory.get("name") else FEW_SHOT_MODIFYING_NO_NAME
-    elif stage == "cancelling":
-        return FEW_SHOT_CANCELLING
-    else:
-        return FEW_SHOT_GENERAL
+    if stage == "confirming":  return FEW_SHOT_CONFIRMING
+    if stage == "confirmed":   return FEW_SHOT_CONFIRMED
+    if stage == "modifying":   return FEW_SHOT_MODIFYING_WHAT if memory.get("name") else FEW_SHOT_MODIFYING_NO_NAME
+    if stage == "cancelling":  return FEW_SHOT_CANCELLING
+    return FEW_SHOT_GENERAL
