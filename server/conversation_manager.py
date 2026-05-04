@@ -455,15 +455,16 @@ def _next_stage(session: dict, intent: str) -> str:
         return "cancelling"
     if intent == "new_reservation":
         return "collecting"
-    if intent == "confirm" and current == "confirming":
-        return "confirmed"
-    if intent == "deny" and current == "confirming":
-        return "collecting"
+    if intent == "new_reservation":
+        # If all fields are already in hand, jump straight to confirming
+        return "confirming" if not missing else "collecting"
     if current in _STICKY_STAGES:
         return current
     if current == "collecting":
         return "confirming" if not missing else "collecting"
     if current == "confirming":
+        if intent == "confirm": return "confirmed"
+        if intent == "deny":    return "collecting"
         return "confirming"
     if current == "confirmed":
         return "general"
@@ -827,34 +828,7 @@ async def chat_stream(session_id: str, user_message: str):
     _process_turn(session, user_message)
     stage  = session["stage"]
     memory = session["memory"]
-    logger.info(f"[SESSION] [{session_id}] stage={stage} intent={session['intent']} memory={memory}")
-
-    # ── Deterministic confirmations (no LLM needed) ───────────────────────────
-    if stage == "confirming":
-        reply = _build_confirming_reply(memory)
-        session["history"].append({"role": "assistant", "content": reply})
-        yield reply
-        return
-
-    if stage == "confirmed":
-        reply = _build_confirmed_reply(memory)
-        session["history"].append({"role": "assistant", "content": reply})
-        # Auto-save to DB
-        _name = memory.get("name", "")
-        _date = memory.get("date", "")
-        _time = memory.get("time", "")
-        if _name and _date and _time:
-            res_data = {
-                "date":    _date,
-                "time":    _time,
-                "guests":  memory.get("guests", "2"),
-                "dietary": memory.get("dietary_preferences", ""),
-                "special": memory.get("special_requests", ""),
-            }
-            log_crm("add_reservation", f"Saving reservation for '{_name}'")
-            add_reservation(_name, res_data, session_id)
-        yield reply
-        return
+    logger.info(f"[{get_now()}] [STAGE] {stage} | intent={session['intent']}")
 
     # ── Tool + RAG in parallel ────────────────────────────────────────────────
     pre_start = time.time()
@@ -953,6 +927,23 @@ async def chat_stream(session_id: str, user_message: str):
         yield full_response
 
     log_llm_end(full_response)
+
+    # ── Persistence for Confirmed bookings ────────────────────────────────────
+    if stage == "confirmed" and not session.get("reservation_saved"):
+        _name = memory.get("name", "")
+        _date = memory.get("date", "")
+        _time = memory.get("time", "")
+        if _name and _date and _time:
+            res_data = {
+                "date":    _date,
+                "time":    _time,
+                "guests":  memory.get("guests", "2"),
+                "dietary": memory.get("dietary_preferences", ""),
+                "special": memory.get("special_requests", ""),
+            }
+            log_crm("add_reservation", f"Auto-saving booking for '{_name}'")
+            add_reservation(_name, res_data, session_id)
+            session["reservation_saved"] = True
 
     # ── Fallback ──────────────────────────────────────────────────────────────
     if not full_response.strip():
