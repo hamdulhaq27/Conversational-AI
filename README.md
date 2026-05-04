@@ -136,5 +136,55 @@ docker compose down
 - CPU inference latency increases for longer responses.
 - Regex extraction may miss highly unusual phrasing patterns.
 
+## Assignment 5 Evaluation Suite
+An automated evaluation pipeline is included under `evals/` and can be executed with one command.
+
+### Run Evaluations
+1. Start the backend API first (`uvicorn api:app --host 0.0.0.0 --port 8000`).
+2. From repository root run:
+
+```bash
+python run_evals.py
+```
+
+Optional environment variables:
+- `EVAL_API_BASE` (default: `http://localhost:8000`)
+- `EVAL_TRIALS` (default: `30`, used for latency trials)
+
+### Output Artifacts
+- JSON report: `evals/results/eval_report_<timestamp>.json`
+- Markdown report: `evals/results/eval_report_<timestamp>.md`
+- Plot files:
+  - `evals/results/concurrency_vs_latency_<timestamp>.png`
+  - `evals/results/scenario_vs_latency_<timestamp>.png`
+
+### Evaluation Data Included
+- Test conversations (10 dialogues): `evals/data/conversations.json`
+- RAG retrieval ground-truth queries (20): `evals/data/rag_ground_truth.json`
+- Tool invocation test set: `evals/data/tool_invocation_cases.json`
+- Faithfulness question set (30): `evals/data/rag_faithfulness_questions.json`
+
+### Metrics and Formulas
+- **Task completion rate** = completed_dialogues / total_dialogues
+- **Policy adherence rate** = policy-compliant_dialogues / total_dialogues
+- **Coherence rate** = coherent_dialogues / total_dialogues
+- **Precision@k** = relevant_retrieved / k
+- **Recall@k** = relevant_retrieved / relevant_total
+- **MRR** = mean(1 / rank_of_first_relevant)
+- **TTFT** = time(first token) - time(request sent)
+- **Inter-token latency** = mean(delta between consecutive token timestamps)
+- **End-to-end latency** = time(last token/end event) - time(request sent)
+- **Throughput** = total_turns / elapsed_seconds
+
+95% confidence intervals are reported for means using a normal approximation.
+
+### Assumptions and Limitations
+- Faithfulness is computed via a deterministic lexical-support heuristic unless replaced with an external framework (e.g., RAGAS).
+- Mixed RAG+tool scenario is approximated as a compound request because tool routing is deterministic in this architecture.
+- Performance metrics are hardware-dependent; run on a quiet machine for reproducible numbers.
+- Failure modes included in the suite:
+  - missing/empty vector database handling,
+  - external tool API failure handling,
+  - malformed tool-call input handling.
 
 
