@@ -1,0 +1,14 @@
+{
+  "venvPath": "server",
+  "venv": ".venv",
+  "extraPaths": [
+    ".",
+    "server",
+    "rag"
+  ],
+  "include": [
+    "rag",
+    "server",
+    "evals"
+  ]
+}
