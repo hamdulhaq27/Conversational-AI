@@ -8,10 +8,10 @@ uvicorn[standard]
 httpx
 websockets
 
-# Audio/Speech (Commented out due to Windows installation issues)
-# faster-whisper
-# soundfile
-# piper-tts
+# Audio/Speech (Uncomment if you have C++ Build Tools installed)
+# faster-whisper==1.2.1
+# soundfile>=0.12.1
+# piper-tts==1.4.2
 
 # Data Processing
 numpy
@@ -20,7 +20,7 @@ pandas
 # ML/Embeddings/LLM
 sentence-transformers
 torch
-ollama
+ollama>=0.3.3
 
 # Vector Database & RAG
 chromadb

@@ -30,9 +30,6 @@ from prompt_templates import (
     REQUIRED_FIELDS,
     _VAGUE_TIMES,
     build_system_prompt,
-    build_modification_prompt,
-    build_cancellation_prompt,
-    build_confirmation_prompt,
     get_few_shot_examples,
 )
 from tools.crm import get_user, update_user
