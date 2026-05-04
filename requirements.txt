@@ -16,6 +16,7 @@ websockets
 # Data Processing
 numpy
 pandas
+matplotlib
 
 # ML/Embeddings/LLM
 sentence-transformers
