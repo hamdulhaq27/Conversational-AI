@@ -13,11 +13,7 @@
 
 ## Overview
 
-This repository spans **Assignments 3 and 5** of the NLP course and contains a fully local, CPU-optimized, microservices-based conversational AI system acting as a restaurant front-desk virtual assistant for **La Bella Tavola**. The assistant — introducing itself as **Sarah Johnson** — handles reservations, menu/weather/helpdesk queries, and modification/cancellation flows entirely through natural language.
-
-**Assignment 3** delivered the core system: a prompt-engineered, FSM-driven assistant with no external Tools or RAG, communicating over WebSockets with real-time token streaming and optional voice I/O.
-
-**Assignment 5** extends it with a full evaluation suite measuring conversational correctness, component-level accuracy (RAG, CRM, tools), and latency/throughput performance.
+This repository spans **Assignments 2-5** of the NLP course and contains a fully local, CPU-optimized, microservices-based conversational AI system acting as a restaurant front-desk virtual assistant for **La Bella Tavola**. The assistant — introducing itself as **Sarah Johnson** — handles reservations, menu/weather/helpdesk queries, and modification/cancellation flows entirely through natural language.
 
 ---
 
