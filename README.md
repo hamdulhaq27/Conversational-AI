@@ -8,10 +8,6 @@
 | Hamdul Haq | 23i-0081 |
 | Ayesha Ikram | 23i-0109 |
 
-**Links:**
-- GitHub Repository: `<ADD_GITHUB_REPO_LINK>`
-- Vercel Deployment: `<ADD_VERCEL_LINK>`
-- Demo Video (Unlisted YouTube): `<ADD_VIDEO_LINK>`
 
 ---
 
